@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SESSION="${1:-}"
+if [[ -z "$SESSION" ]]; then
+  exit 1
+fi
+
+# Resolve the active window from the target session instead of relying on the
+# current client, which may not exist during detached startup.
+W="$(tmux display-message -p -t "${SESSION}:" '#{window_name}' 2>/dev/null || true)"
+W="${W#!}"
+case "$W" in
+  claude) S="fg=colour232,bg=colour214,bold" ;;
+  codex)  S="fg=colour255,bg=colour35,bold" ;;
+  *)      S="fg=colour255,bg=colour240,bold" ;;
+esac
+tmux set-window-option -t "${SESSION}:" window-status-current-style "$S" >/dev/null
+tmux refresh-client -S >/dev/null 2>&1 || true

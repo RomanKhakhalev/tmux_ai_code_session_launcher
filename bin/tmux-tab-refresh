@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$SCRIPT_DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+INSTALLED_BIN_DIR="$HOME/.local/bin"
+
+resolve_helper() {
+  local helper_name="$1"
+  local installed_path="$INSTALLED_BIN_DIR/$helper_name"
+  if [[ -x "$installed_path" ]]; then
+    printf '%s\n' "$installed_path"
+    return
+  fi
+
+  printf '%s\n' "$SCRIPT_DIR/$helper_name"
+}
+
+SESSION="${1:-}"
+if [[ -z "$SESSION" ]]; then
+  exit 1
+fi
+
+has_prompt() {
+  local text="$1"
+
+  if grep -Eq 'Do you want to proceed\?|Would you like to proceed\?' <<<"$text" \
+    && grep -Eq '(^|[[:space:]])1\. Yes' <<<"$text" \
+    && grep -Eq 'No|Tell Claude what to change' <<<"$text"; then
+    return 0
+  fi
+
+  if grep -Eq 'Do you want me to .*\?' <<<"$text" \
+    && grep -Eq '(Yes, allow|(^|[[:space:]])1\. Yes)' <<<"$text"; then
+    return 0
+  fi
+
+  if grep -Eq 'Do you want to make this edit to ' <<<"$text" \
+    && grep -Eq '(^|[[:space:]])1\. Yes' <<<"$text" \
+    && grep -Eq 'allow all edits|(^|[[:space:]])3\. No' <<<"$text"; then
+    return 0
+  fi
+
+  if grep -Eq 'Do you want to overwrite ' <<<"$text" \
+    && grep -Eq '(^|[[:space:]])1\. Yes' <<<"$text" \
+    && grep -Eq '(^|[[:space:]])3\. No' <<<"$text"; then
+    return 0
+  fi
+
+  if grep -Fq "Tool use" <<<"$text" \
+    && grep -Eq 'Do you want to proceed\?' <<<"$text" \
+    && grep -Eq "don't ask again|(^|[[:space:]])3\. No" <<<"$text"; then
+    return 0
+  fi
+
+  return 1
+}
+
+active_needs_attention=0
+
+while IFS=$'\t' read -r window_index window_name window_active; do
+  pane_text="$(tmux capture-pane -p -t "${SESSION}:${window_index}" -S -10 2>/dev/null || true)"
+  base_name="${window_name#!}"
+  if has_prompt "$pane_text"; then
+    if [[ "$window_name" != "!${base_name}" ]]; then
+      tmux rename-window -t "${SESSION}:${window_index}" "!${base_name}" >/dev/null
+    fi
+    if [[ "$window_active" == "1" ]]; then
+      active_needs_attention=1
+    fi
+  else
+    if [[ "$window_name" != "${base_name}" ]]; then
+      tmux rename-window -t "${SESSION}:${window_index}" "${base_name}" >/dev/null
+    fi
+  fi
+done < <(tmux list-windows -t "$SESSION" -F '#{window_index}	#{window_name}	#{window_active}')
+
+if [[ "$active_needs_attention" == "1" ]]; then
+  tmux set-option -w -t "$SESSION" window-status-current-style "fg=colour232,bg=colour220,bold" >/dev/null
+else
+  "$(resolve_helper tmux-tab-colour)" "$SESSION" >/dev/null
+fi
+
+tmux refresh-client -S >/dev/null 2>&1 || true

@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage: new-session [--recreate] <name> [base-branch]
+# Layout, colours, git worktree, and startup commands are all in tmuxp/feature.yaml
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$SCRIPT_DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+DOTFILES_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+TMUXP_TEMPLATE="$DOTFILES_ROOT/tmuxp/feature.yaml"
+INSTALLED_BIN_DIR="$HOME/.local/bin"
+
+require_command() {
+  local command_name="$1"
+  if ! command -v "$command_name" &>/dev/null; then
+    echo "Error: missing required command '$command_name'" >&2
+    exit 1
+  fi
+}
+
+escape_sed_replacement() {
+  printf '%s' "$1" | sed -e 's/[\\/&]/\\&/g'
+}
+
+shell_join() {
+  local quoted=()
+  local arg
+  for arg in "$@"; do
+    printf -v arg '%q' "$arg"
+    quoted+=("$arg")
+  done
+  local IFS=' '
+  printf '%s' "${quoted[*]}"
+}
+
+resolve_helper() {
+  local helper_name="$1"
+  local installed_path="$INSTALLED_BIN_DIR/$helper_name"
+  if [[ -x "$installed_path" ]]; then
+    printf '%s\n' "$installed_path"
+    return
+  fi
+
+  printf '%s\n' "$SCRIPT_DIR/$helper_name"
+}
+
+RECREATE=false
+POSITIONAL=()
+for arg in "$@"; do
+  if [[ "$arg" == "--recreate" ]]; then
+    RECREATE=true
+  else
+    POSITIONAL+=("$arg")
+  fi
+done
+
+NAME="${POSITIONAL[0]:-}"
+BASE="${POSITIONAL[1]:-}"
+
+if [[ -z "$NAME" ]]; then
+  echo "Usage: new-session [--recreate] <name> [base-branch]" >&2
+  exit 1
+fi
+
+require_command git
+require_command tmux
+require_command tmuxp
+require_command claude
+require_command codex
+
+if [[ ! -f "$TMUXP_TEMPLATE" ]]; then
+  echo "Error: tmuxp template not found at $TMUXP_TEMPLATE" >&2
+  exit 1
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$REPO_ROOT" ]]; then
+  echo "Error: not inside a git repository" >&2
+  exit 1
+fi
+
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  GIT_DIR_PATH="$(git rev-parse --git-dir 2>/dev/null || true)"
+  if [[ "$GIT_DIR_PATH" == */.git/worktrees/* ]]; then
+    echo "Error: new-session must be run from the main repository checkout, not from inside an existing worktree." >&2
+    exit 1
+  fi
+fi
+
+if [[ -z "$BASE" ]]; then
+  BASE="$(git -C "$REPO_ROOT" branch --show-current)"
+  if [[ -z "$BASE" ]]; then
+    echo "Error: could not detect the current branch. Pass an explicit base branch." >&2
+    exit 1
+  fi
+fi
+
+WORKTREE_PATH="$REPO_ROOT/.worktrees/$NAME"
+TAB_REFRESH_BIN="$(resolve_helper tmux-tab-refresh)"
+TAB_WATCH_BIN="$(resolve_helper tmux-tab-watch)"
+
+link_shared_file_if_present() {
+  local source_path="$1"
+  local target_path="$2"
+
+  if [[ ! -f "$source_path" ]]; then
+    return
+  fi
+
+  if [[ -e "$target_path" || -L "$target_path" ]]; then
+    return
+  fi
+
+  ln -s "$source_path" "$target_path"
+}
+
+BRANCH_EXISTS=false
+WORKTREE_EXISTS=false
+SESSION_EXISTS=false
+git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$NAME" && BRANCH_EXISTS=true
+[[ -d "$WORKTREE_PATH" ]] && WORKTREE_EXISTS=true
+tmux has-session -t "$NAME" 2>/dev/null && SESSION_EXISTS=true
+
+if [[ "$RECREATE" == true ]]; then
+  [[ "$SESSION_EXISTS"  == true ]] && { echo "Killing tmux session: $NAME"; tmux kill-session -t "$NAME"; }
+  [[ "$WORKTREE_EXISTS" == true ]] && { echo "Removing worktree: $WORKTREE_PATH"; git -C "$REPO_ROOT" worktree remove "$WORKTREE_PATH" --force; }
+  [[ "$BRANCH_EXISTS"   == true ]] && { echo "Deleting branch: $NAME"; git -C "$REPO_ROOT" branch -D "$NAME"; }
+  BRANCH_EXISTS=false; WORKTREE_EXISTS=false; SESSION_EXISTS=false
+elif [[ "$SESSION_EXISTS" == true && "$BRANCH_EXISTS" == true ]]; then
+  echo "Session '$NAME' already exists. Attaching..."
+  exec tmux attach-session -t "$NAME"
+elif [[ "$SESSION_EXISTS" == true ]]; then
+  echo "Error: tmux session '$NAME' already exists" >&2
+  exit 1
+fi
+
+mkdir -p "$REPO_ROOT/.worktrees"
+
+if [[ "$WORKTREE_EXISTS" == true ]]; then
+  echo "Reusing existing worktree: $WORKTREE_PATH"
+else
+  echo "Creating worktree: $WORKTREE_PATH (branch: $NAME, from: $BASE)"
+  if [[ "$BRANCH_EXISTS" == true ]]; then
+    git -C "$REPO_ROOT" worktree add "$WORKTREE_PATH" "$NAME"
+  else
+    git -C "$REPO_ROOT" worktree add "$WORKTREE_PATH" -b "$NAME" "$BASE"
+  fi
+fi
+
+link_shared_file_if_present "$REPO_ROOT/.env" "$WORKTREE_PATH/.env"
+link_shared_file_if_present "$REPO_ROOT/.env.local" "$WORKTREE_PATH/.env.local"
+
+export TMUXP_NAME="$NAME"
+export TMUXP_WORKTREE="$WORKTREE_PATH"
+
+# Substitute env vars into a temp file without relying on envsubst.
+TMPFILE="$(mktemp /tmp/tmuxp-XXXXXX.yaml)"
+sed \
+  -e "s|\${TMUXP_NAME}|$(escape_sed_replacement "$TMUXP_NAME")|g" \
+  -e "s|\${TMUXP_WORKTREE}|$(escape_sed_replacement "$TMUXP_WORKTREE")|g" \
+  "$TMUXP_TEMPLATE" > "$TMPFILE"
+trap 'rm -f "$TMPFILE"' EXIT
+
+tmuxp load "$TMPFILE" -d
+
+# Keep tab labels plain; the refresher script renames prompting tabs and
+# updates the active-tab colour, while the tmux-owned watcher keeps it current.
+ALERT_WINDOW_FORMAT='#{?#{m:!*,#{window_name}},#[fg=colour196 bold] #W #[default], #W }'
+
+tmux set-option -t "$NAME" status-style "fg=#CCCCCC,bg=#1A1A1A"
+tmux set-option -t "$NAME" status-left "#[fg=#CCCCCC,bg=#1A1A1A,bold] #S  "
+tmux set-option -t "$NAME" status-left-length 40
+tmux set-option -t "$NAME" status-interval 3
+tmux set-option -t "$NAME" status-right " %H:%M "
+tmux set-option -w -t "$NAME" window-status-style "fg=colour245,bg=colour234"
+tmux set-option -w -t "$NAME" window-status-format "$ALERT_WINDOW_FORMAT"
+tmux set-option -w -t "$NAME" window-status-current-format "$ALERT_WINDOW_FORMAT"
+tmux set-hook -t "$NAME" after-select-window "run-shell \"$(shell_join "$TAB_REFRESH_BIN" "$NAME")\""
+
+tmux select-window -t "$NAME:0"
+"$TAB_REFRESH_BIN" "$NAME" || true
+tmux run-shell -b "$(shell_join "$TAB_WATCH_BIN" "$NAME")"
+tmux attach-session -t "$NAME"

@@ -1,0 +1,26 @@
+# Feature development session
+# Variables substituted by new-session before loading.
+# Use ${TMUXP_NAME} and ${TMUXP_WORKTREE} as placeholders.
+#
+# To add a new session type: duplicate this file, adjust windows/panes/colours.
+
+session_name: "${TMUXP_NAME}"
+
+windows:
+
+  - window_name: "claude"
+    start_directory: "${TMUXP_WORKTREE}"
+    panes:
+      - shell_command:
+          - claude --effort high
+
+  - window_name: "codex"
+    start_directory: "${TMUXP_WORKTREE}"
+    panes:
+      - shell_command:
+          - codex -c 'model_reasoning_effort="high"'
+
+  - window_name: "console"
+    start_directory: "${TMUXP_WORKTREE}"
+    panes:
+      - shell_command: []

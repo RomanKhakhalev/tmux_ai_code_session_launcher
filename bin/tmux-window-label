@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SESSION="${1:-}"
+WINDOW_INDEX="${2:-}"
+WINDOW_NAME="${3:-}"
+IS_ACTIVE="${4:-0}"
+
+PANE_TEXT="$(tmux capture-pane -p -t "${SESSION}:${WINDOW_INDEX}" -S -80 2>/dev/null || true)"
+
+has_prompt() {
+  local text="$1"
+
+  if grep -Eq 'Do you want to proceed\?|Would you like to proceed\?' <<<"$text" \
+    && grep -Eq '(^|[[:space:]])1\. Yes' <<<"$text" \
+    && grep -Eq 'No|Tell Claude what to change' <<<"$text"; then
+    return 0
+  fi
+
+  if grep -Eq 'Do you want me to .*\?' <<<"$text" \
+    && grep -Eq '(Yes, allow|(^|[[:space:]])1\. Yes)' <<<"$text"; then
+    return 0
+  fi
+
+  if grep -Fq "Tool use" <<<"$text" \
+    && grep -Eq 'Do you want to proceed\?' <<<"$text" \
+    && grep -Eq 'don.t ask again|(^|[[:space:]])3\. No' <<<"$text"; then
+    return 0
+  fi
+
+  return 1
+}
+
+base_label=" ${WINDOW_NAME} "
+
+if has_prompt "$PANE_TEXT"; then
+  if [[ "$IS_ACTIVE" == "1" ]]; then
+    printf '#[fg=colour232 bg=colour220 bold] !%s #[default]' "$WINDOW_NAME"
+  else
+    printf '#[fg=colour220 bg=colour234 bold] !%s #[default]' "$WINDOW_NAME"
+  fi
+  exit 0
+fi
+
+case "$WINDOW_NAME" in
+  claude)
+    if [[ "$IS_ACTIVE" == "1" ]]; then
+      printf '#[fg=colour232 bg=colour214 bold]%s#[default]' "$base_label"
+    else
+      printf '#[fg=colour214 bg=colour234]%s#[default]' "$base_label"
+    fi
+    ;;
+  codex)
+    if [[ "$IS_ACTIVE" == "1" ]]; then
+      printf '#[fg=colour255 bg=colour35 bold]%s#[default]' "$base_label"
+    else
+      printf '#[fg=colour35 bg=colour234]%s#[default]' "$base_label"
+    fi
+    ;;
+  *)
+    if [[ "$IS_ACTIVE" == "1" ]]; then
+      printf '#[fg=colour255 bg=colour240 bold]%s#[default]' "$base_label"
+    else
+      printf '#[fg=colour245 bg=colour234]%s#[default]' "$base_label"
+    fi
+    ;;
+esac

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "$SOURCE" ]]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$SCRIPT_DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+INSTALLED_BIN_DIR="$HOME/.local/bin"
+
+resolve_helper() {
+  local helper_name="$1"
+  local installed_path="$INSTALLED_BIN_DIR/$helper_name"
+  if [[ -x "$installed_path" ]]; then
+    printf '%s\n' "$installed_path"
+    return
+  fi
+
+  printf '%s\n' "$SCRIPT_DIR/$helper_name"
+}
+
+SESSION="${1:-}"
+if [[ -z "$SESSION" ]]; then
+  exit 1
+fi
+
+STATE_DIR="/tmp/tmux-tab-watch"
+PID_FILE="${STATE_DIR}/${SESSION}.pid"
+
+mkdir -p "$STATE_DIR"
+
+if [[ -f "$PID_FILE" ]]; then
+  existing_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+    exit 0
+  fi
+fi
+
+echo "$$" > "$PID_FILE"
+trap 'rm -f "$PID_FILE"' EXIT
+
+while tmux has-session -t "$SESSION" 2>/dev/null; do
+  "$(resolve_helper tmux-tab-refresh)" "$SESSION" || true
+  sleep 3
+done
