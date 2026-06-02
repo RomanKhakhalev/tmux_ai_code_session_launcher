@@ -103,6 +103,7 @@ fi
 WORKTREE_PATH="$REPO_ROOT/.worktrees/$NAME"
 TAB_REFRESH_BIN="$(resolve_helper tmux-tab-refresh)"
 TAB_WATCH_BIN="$(resolve_helper tmux-tab-watch)"
+COPY_BIN="$(resolve_helper tmux-copy)"
 
 link_shared_file_if_present() {
   local source_path="$1"
@@ -172,6 +173,7 @@ tmuxp load "$TMPFILE" -d
 # updates the active-tab colour, while the tmux-owned watcher keeps it current.
 ALERT_WINDOW_FORMAT='#{?#{m:!*,#{window_name}},#[fg=colour196 bold] #W #[default], #W }'
 
+tmux set-option -t "$NAME" mouse on
 tmux set-option -t "$NAME" status-style "fg=#CCCCCC,bg=#1A1A1A"
 tmux set-option -t "$NAME" status-left "#[fg=#CCCCCC,bg=#1A1A1A,bold] #S  "
 tmux set-option -t "$NAME" status-left-length 40
@@ -181,6 +183,12 @@ tmux set-option -w -t "$NAME" window-status-style "fg=colour245,bg=colour234"
 tmux set-option -w -t "$NAME" window-status-format "$ALERT_WINDOW_FORMAT"
 tmux set-option -w -t "$NAME" window-status-current-format "$ALERT_WINDOW_FORMAT"
 tmux set-hook -t "$NAME" after-select-window "run-shell \"$(shell_join "$TAB_REFRESH_BIN" "$NAME")\""
+tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
+tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
+tmux bind-key -T copy-mode DoubleClick1Pane select-pane \; send-keys -X select-word \; run-shell -d 0.3 \; send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
+tmux bind-key -T copy-mode-vi DoubleClick1Pane select-pane \; send-keys -X select-word \; run-shell -d 0.3 \; send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
+tmux bind-key -T copy-mode TripleClick1Pane select-pane \; send-keys -X select-line \; run-shell -d 0.3 \; send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
+tmux bind-key -T copy-mode-vi TripleClick1Pane select-pane \; send-keys -X select-line \; run-shell -d 0.3 \; send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
 
 tmux select-window -t "$NAME:0"
 "$TAB_REFRESH_BIN" "$NAME" || true

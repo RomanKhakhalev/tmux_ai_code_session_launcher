@@ -108,8 +108,8 @@ Window navigation shortcuts:
 | `Alt+l` | Next window |
 | `Alt+Shift+[` | Previous window |
 | `Alt+Shift+]` | Next window |
-| `Cmd+Shift+[` | Previous window on macOS terminals that emit the expected sequence |
-| `Cmd+Shift+]` | Next window on macOS terminals that emit the expected sequence |
+| `Ú` | Previous window on macOS/iTerm |
+| `Æ` | Next window on macOS/iTerm |
 
 Mouse selection copy now uses `bin/tmux-copy`, which picks the first available clipboard tool from `pbcopy`, `wl-copy`, `xclip`, or `xsel`.
 
