@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prepare TEL tmux session"
+  short_description: "Prepare TEL issues before implementation"
+  default_prompt: "Use $prepare-to-tels-in-tmux to prepare the current tmux TEL session, gather issue context, and lock intent, DoD, and open product/design questions before implementation."

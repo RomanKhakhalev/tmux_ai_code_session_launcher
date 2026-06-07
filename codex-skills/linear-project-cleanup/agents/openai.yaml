@@ -1,0 +1,4 @@
+interface:
+  display_name: "Linear Project Cleanup"
+  short_description: "Consolidate Linear project sprawl"
+  default_prompt: "Use this skill to audit a cluttered Linear workspace, define a stable initiative taxonomy, migrate issues into consolidated projects, and close emptied legacy projects."

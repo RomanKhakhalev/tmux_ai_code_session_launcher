@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implement Plan Regression"
+  short_description: "Review diffs against plan and UX decisions"
+  default_prompt: "Use $implement-plan-regression to check staged and unstaged diffs against this plan file and the thread history for visible UX regressions."

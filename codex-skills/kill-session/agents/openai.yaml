@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kill Session"
+  short_description: "Safely close a feature session"
+  default_prompt: "Use $kill-session to safely close the current feature session."

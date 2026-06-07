@@ -1,0 +1,4 @@
+interface:
+  display_name: "Linear Project"
+  short_description: "Create or update a Linear project"
+  default_prompt: "Use $linear-project to create or update a Linear project from this implementation plan."
