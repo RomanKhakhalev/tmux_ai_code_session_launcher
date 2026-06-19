@@ -16,7 +16,7 @@ Apply these checks in order:
 | Session target | Main checkout instead of a linked worktree | Hard block. Stop. |
 | Merge conflicts | Any `UU`, `AA`, `DD`, `AU`, `UA`, `DU`, `UD` entry | Hard block. Stop. Do not bypass. |
 | Uncommitted changes | Any staged or unstaged change | Block. Show files and wait for the user to commit, stash, or explicitly abandon. |
-| Unmerged commits | Any commit on the current branch not in `develop` (or `main` if `develop` does not exist) | Block. Show commits and ask whether to abandon or keep the branch open. If there are no unmerged commits, do not ask a merge/abandon question. |
+| Unmerged commits | Any commit on the current branch not in `roman` | Block. Show commits and ask whether to abandon or keep the branch open. If there are no unmerged commits, do not ask a merge/abandon question. |
 | Worktree target | Before any destructive action | Block until the user explicitly confirms the exact worktree and branch to delete. |
 | Merge/abandon state | Before any destructive action | Block until the user explicitly confirms the work has been merged elsewhere or should be abandoned. |
 | Open Linear issue | Linked issue not in `Done` or `Cancelled` | Block until the issue is closed or the user explicitly confirms there is nothing to close. |
@@ -31,12 +31,29 @@ Run:
 
 ```bash
 BRANCH=$(git branch --show-current)
-SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+TMUX_ERROR_FILE=$(mktemp)
+SESSION=$(tmux display-message -p '#S' 2>"$TMUX_ERROR_FILE")
+TMUX_STATUS=$?
+TMUX_ERROR=$(cat "$TMUX_ERROR_FILE")
+rm -f "$TMUX_ERROR_FILE"
+
+if [ "$TMUX_STATUS" -ne 0 ]; then
+  if [ -n "${TMUX:-}" ]; then
+    echo "tmux session lookup failed while TMUX is set:"
+    echo "$TMUX_ERROR"
+    echo "Request elevated tmux socket access and rerun: tmux display-message -p '#S'"
+    exit 1
+  fi
+
+  SESSION=""
+fi
 REPO_ROOT=$(git rev-parse --show-toplevel)
 WORKTREE_PATH=$(pwd)
 MAIN_CHECKOUT=$(git worktree list | awk 'NR==1 {print $1}')
 git worktree list
 ```
+
+If `tmux display-message` fails while `$TMUX` is set, do not treat this as no tmux session. Stop, show the tmux error, and request elevated permission to read the tmux socket. Only leave `SESSION` empty when `$TMUX` is unset or tmux reports no server/session.
 
 Treat the session as invalid if `WORKTREE_PATH` equals `MAIN_CHECKOUT`. In that case, stop and say: `This is the main checkout; kill-session only runs in a worktree.`
 
@@ -78,10 +95,8 @@ If the user chooses to abandon changes, restate that this discards local modific
 Run:
 
 ```bash
-if git show-ref --verify --quiet refs/heads/develop; then
-  BASE_BRANCH=develop
-elif git show-ref --verify --quiet refs/heads/main; then
-  BASE_BRANCH=main
+if git show-ref --verify --quiet refs/heads/roman; then
+  BASE_BRANCH=roman
 else
   BASE_BRANCH=
 fi
@@ -96,7 +111,7 @@ If any commits are listed:
 - If the user wants to keep the branch, stop.
 - If the user explicitly confirms abandon, continue.
 
-If no commits are listed, proceed without asking a merge/abandon confirmation. A clean branch with no commits ahead of `develop` (or `main` when `develop` is absent) has no unique branch content left to protect.
+If no commits are listed, proceed without asking a merge/abandon confirmation. A clean branch with no commits ahead of `roman` has no unique branch content left to protect.
 
 If commits are listed and the user still wants teardown, ask for the explicit final confirmation before proceeding: `Confirm the content from this session should be abandoned.`
 
@@ -168,7 +183,9 @@ Then run:
 tmux run-shell -b "sleep 2; tmux kill-session -t '$SESSION'"
 ```
 
-If `SESSION` is empty, skip tmux shutdown and report only that the worktree was removed.
+If `SESSION` is empty but `$TMUX` is set, stop instead of skipping tmux shutdown. This means session detection failed.
+
+If `SESSION` is empty and `$TMUX` is unset, skip tmux shutdown and report only that the worktree was removed.
 
 ## Response Style
 

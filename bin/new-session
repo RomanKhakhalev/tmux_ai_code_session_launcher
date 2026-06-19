@@ -49,6 +49,17 @@ resolve_helper() {
   printf '%s\n' "$SCRIPT_DIR/$helper_name"
 }
 
+open_tmux_session() {
+  local session_name="$1"
+
+  if [[ -n "${TMUX:-}" ]]; then
+    tmux switch-client -t "$session_name"
+    return
+  fi
+
+  exec tmux attach-session -t "$session_name"
+}
+
 RECREATE=false
 POSITIONAL=()
 for arg in "$@"; do
@@ -104,6 +115,7 @@ WORKTREE_PATH="$REPO_ROOT/.worktrees/$NAME"
 TAB_REFRESH_BIN="$(resolve_helper tmux-tab-refresh)"
 TAB_WATCH_BIN="$(resolve_helper tmux-tab-watch)"
 COPY_BIN="$(resolve_helper tmux-copy)"
+WINDOW_LABEL_BIN="$(resolve_helper tmux-window-label)"
 
 link_shared_file_if_present() {
   local source_path="$1"
@@ -120,6 +132,46 @@ link_shared_file_if_present() {
   ln -s "$source_path" "$target_path"
 }
 
+link_node_modules_if_present() {
+  local package_json
+  local package_dir
+  local relative_dir
+  local source_path
+  local target_path
+
+  while IFS= read -r package_json; do
+    package_dir="$(dirname "$package_json")"
+    source_path="$package_dir/node_modules"
+
+    if [[ ! -d "$source_path" ]]; then
+      continue
+    fi
+
+    relative_dir="${package_dir#$REPO_ROOT}"
+    relative_dir="${relative_dir#/}"
+
+    if [[ -z "$relative_dir" ]]; then
+      target_path="$WORKTREE_PATH/node_modules"
+    else
+      target_path="$WORKTREE_PATH/$relative_dir/node_modules"
+    fi
+
+    if [[ -e "$target_path" || -L "$target_path" ]]; then
+      continue
+    fi
+
+    mkdir -p "$(dirname "$target_path")"
+    ln -s "$source_path" "$target_path"
+    echo "Linked node_modules: $target_path -> $source_path"
+  done < <(
+    find "$REPO_ROOT" \
+      -path "$REPO_ROOT/.git" -prune -o \
+      -path "$REPO_ROOT/.worktrees" -prune -o \
+      -path "*/node_modules" -prune -o \
+      -name package.json -type f -print
+  )
+}
+
 BRANCH_EXISTS=false
 WORKTREE_EXISTS=false
 SESSION_EXISTS=false
@@ -133,8 +185,9 @@ if [[ "$RECREATE" == true ]]; then
   [[ "$BRANCH_EXISTS"   == true ]] && { echo "Deleting branch: $NAME"; git -C "$REPO_ROOT" branch -D "$NAME"; }
   BRANCH_EXISTS=false; WORKTREE_EXISTS=false; SESSION_EXISTS=false
 elif [[ "$SESSION_EXISTS" == true && "$BRANCH_EXISTS" == true ]]; then
-  echo "Session '$NAME' already exists. Attaching..."
-  exec tmux attach-session -t "$NAME"
+  echo "Session '$NAME' already exists. Opening..."
+  open_tmux_session "$NAME"
+  exit 0
 elif [[ "$SESSION_EXISTS" == true ]]; then
   echo "Error: tmux session '$NAME' already exists" >&2
   exit 1
@@ -155,23 +208,25 @@ fi
 
 link_shared_file_if_present "$REPO_ROOT/.env" "$WORKTREE_PATH/.env"
 link_shared_file_if_present "$REPO_ROOT/.env.local" "$WORKTREE_PATH/.env.local"
+link_node_modules_if_present
 
 export TMUXP_NAME="$NAME"
 export TMUXP_WORKTREE="$WORKTREE_PATH"
 
 # Substitute env vars into a temp file without relying on envsubst.
-TMPFILE="$(mktemp /tmp/tmuxp-XXXXXX.yaml)"
+RENDERED_TMUXP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tmuxp-XXXXXX")"
+TMPFILE="$RENDERED_TMUXP_DIR/feature.yaml"
 sed \
   -e "s|\${TMUXP_NAME}|$(escape_sed_replacement "$TMUXP_NAME")|g" \
   -e "s|\${TMUXP_WORKTREE}|$(escape_sed_replacement "$TMUXP_WORKTREE")|g" \
   "$TMUXP_TEMPLATE" > "$TMPFILE"
-trap 'rm -f "$TMPFILE"' EXIT
+trap 'rm -rf "$RENDERED_TMUXP_DIR"' EXIT
 
 tmuxp load "$TMPFILE" -d
 
-# Keep tab labels plain; the refresher script renames prompting tabs and
-# updates the active-tab colour, while the tmux-owned watcher keeps it current.
-ALERT_WINDOW_FORMAT='#{?#{m:!*,#{window_name}},#[fg=colour196 bold] #W #[default], #W }'
+# Render each tab through a helper so active, inactive, and attention states can
+# use distinct colours across terminal platforms.
+WINDOW_LABEL_FORMAT="#($(shell_join "$WINDOW_LABEL_BIN") \"#S\" \"#I\" \"#W\" \"#{window_active}\")"
 
 tmux set-option -t "$NAME" mouse on
 tmux set-option -t "$NAME" status-style "fg=#CCCCCC,bg=#1A1A1A"
@@ -179,9 +234,11 @@ tmux set-option -t "$NAME" status-left "#[fg=#CCCCCC,bg=#1A1A1A,bold] #S  "
 tmux set-option -t "$NAME" status-left-length 40
 tmux set-option -t "$NAME" status-interval 3
 tmux set-option -t "$NAME" status-right " %H:%M "
+tmux set-option -t "$NAME" set-titles on
+tmux set-option -t "$NAME" set-titles-string "tmux attach -t $NAME"
 tmux set-option -w -t "$NAME" window-status-style "fg=colour245,bg=colour234"
-tmux set-option -w -t "$NAME" window-status-format "$ALERT_WINDOW_FORMAT"
-tmux set-option -w -t "$NAME" window-status-current-format "$ALERT_WINDOW_FORMAT"
+tmux set-option -w -t "$NAME" window-status-format "$WINDOW_LABEL_FORMAT"
+tmux set-option -w -t "$NAME" window-status-current-format "$WINDOW_LABEL_FORMAT"
 tmux set-hook -t "$NAME" after-select-window "run-shell \"$(shell_join "$TAB_REFRESH_BIN" "$NAME")\""
 tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
 tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
@@ -193,4 +250,4 @@ tmux bind-key -T copy-mode-vi TripleClick1Pane select-pane \; send-keys -X selec
 tmux select-window -t "$NAME:0"
 "$TAB_REFRESH_BIN" "$NAME" || true
 tmux run-shell -b "$(shell_join "$TAB_WATCH_BIN" "$NAME")"
-tmux attach-session -t "$NAME"
+open_tmux_session "$NAME"

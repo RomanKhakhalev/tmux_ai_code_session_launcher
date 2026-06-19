@@ -75,10 +75,12 @@ What `new-session` does:
 
 1. Creates `.worktrees/<name>` on branch `<name>`
 2. Symlinks root `.env` and `.env.local` into the worktree if those files exist in the main checkout
-3. Starts a tmux session named `<name>` with three windows:
+3. Symlinks any existing `node_modules` directories next to tracked `package.json` files into the same relative paths in the worktree
+4. Starts a tmux session named `<name>` with three windows:
    - `claude` running `claude --effort high`
    - `codex` running `codex -c 'model_reasoning_effort="high"'`
    - `console` running a plain shell
+5. Opens the session by attaching from a normal shell, or switching clients when run from inside tmux
 
 If you omit `[base-branch]`, `new-session` now uses the currently checked-out branch in the main repo instead of assuming `develop`.
 
@@ -98,7 +100,9 @@ Run recreate from outside the tmux session you are destroying, otherwise tmux wi
 - `claude` windows are orange
 - `codex` windows are green
 - Other windows are grey
-- If Claude or Codex is waiting for confirmation, the window is renamed with a leading `!` and the active tab turns yellow
+- If Claude or Codex is waiting for confirmation, the window is tracked with an internal leading `!` marker and the visible tmux tab shows `[!] Action Required: <window>`
+- While any window in a session needs attention, the outer terminal title appends `[!] Action Required` to `tmux attach -t <session>`
+- When the prompt is cleared, the watcher removes the attention marker and restores the normal terminal title
 
 Window navigation shortcuts:
 
