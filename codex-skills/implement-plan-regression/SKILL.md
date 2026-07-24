@@ -1,6 +1,6 @@
 ---
 name: implement-plan-regression
-description: Review staged and unstaged git diffs against an implementation plan and the current agent thread history to catch visible or UX regressions, workflow drift, and violations of explicit user decisions. Use when the user asks to check a plan file against the current diff, re-run a regression review after debugging, or verify that staged/unstaged changes still match agreed UX behavior.
+description: Review staged and unstaged git diffs against an implementation plan and the current agent thread history to catch visible or UX regressions, workflow drift, parallel Tellis W/G/M or accounting ownership, and violations of explicit user decisions. Use when the user asks to check a plan file against the current diff, re-run a regression review after debugging, or verify that staged/unstaged changes still match agreed UX and workflow behavior.
 ---
 
 # Implement Plan Regression
@@ -10,8 +10,9 @@ Use this skill to check whether the current implementation has drifted from:
 - explicit UX or workflow decisions made with the user in the current thread
 - previously agreed wording or state transitions
 - existing Playwright or DoD-style test evidence that helps explain intended behavior
+- explicit single-owner locks for Tellis W/G/M lifecycle, current-artifact identity, and usage accounting
 
-This is a regression review skill, not a general code review. Focus on visible behavior, interaction flow, copy, guardrails, and state consistency.
+This is a regression review skill, not a general code review. Focus on visible behavior, interaction flow, copy, guardrails, state consistency, and workflow-visible ownership regressions. For Tellis durable pipelines, a second lifecycle or accounting owner is workflow-visible even when the immediate diff has no UI changes.
 
 ## Inputs
 
@@ -45,10 +46,13 @@ Prioritize:
 - reversions of user-approved wording or UX decisions
 - cases where one part of the UI was updated but related behavior was left behind
 - unjustified weakening of Playwright coverage when a spec previously served as meaningful DoD evidence
+- blunt copy-paste duplication introduced across touched files, especially duplicated branches, helpers, validation rules, UI blocks, test scaffolds, or prompt/label logic that should clearly share one implementation
+- routes, workers, pipeline-specific collections, Redis records, wrappers, or compatibility paths that independently create/finalize W/G/M state, select current artifacts, reconcile lifecycle state, or maintain usage totals outside the canonical owner
+- partial reuse where the diff calls canonical W/G/M or `usage_events` helpers but also introduces a competing source of truth
 
 Ignore:
 - pure refactors with no visible effect
-- generic code quality concerns unless they create a likely user-facing regression
+- generic code quality concerns unless they create a likely user-facing regression or are blunt copy-paste duplication introduced by the current diff
 - unrelated worktree noise
 - Playwright spec churn by itself when the changed spec still matches the plan intent and the revised assertions remain a reasonable DoD outline
 
@@ -63,6 +67,8 @@ Open the plan file and extract:
 - workflow expectations
 - accepted tradeoffs
 - explicit exclusions
+- canonical W/G/M, RunItem, artifact, and usage-accounting owners
+- any explicit lock forbidding parallel lifecycle, current-artifact, or accounting mechanisms
 
 Prefer a short scratch list of concrete expectations such as:
 - “row click opens settings only”
@@ -104,6 +110,29 @@ git diff --cached -- <paths>
 
 Read only the files needed to verify behavior.
 
+Build the touched-file set from both staged and unstaged diffs:
+
+```bash
+git diff --name-only
+git diff --cached --name-only
+```
+
+When the plan touches a Tellis durable workflow, classify every newly added or changed route, worker, collection, Redis key, compatibility wrapper, and usage field in the diff:
+- **canonical owner** — creates or mutates authoritative W/G/M, RunItem, artifact, or `usage_events` state
+- **projection/transport** — reflects or carries canonical state without independently deciding it
+- **parallel owner** — independently creates, finalizes, selects, reconciles, or totals the same state
+
+Treat any parallel owner as a regression unless the plan explicitly defines it as a replacement and includes migration, compatibility, and deprecation steps. Redis polling state and cached rollups must remain projections, not lifecycle or accounting sources of truth.
+
+For every touched source, test, config, or docs file in that set, check for blunt copy-paste duplication introduced by the current diff:
+- compare newly added blocks against nearby existing code in the same file
+- compare similar additions across touched files
+- look for repeated conditionals, request/response mappers, validation snippets, UI rows/cards/tooltips, status-label logic, prompt strings, test setup, and mock payloads
+- distinguish intentional parallel structure from avoidable duplication by asking whether the duplicated block would need to be edited in multiple places for the same future behavior change
+- do not flag short repeated literals, conventional imports, tiny type declarations, table columns, fixture data, or deliberate symmetry unless the duplication creates real drift risk
+
+When a duplication concern is plausible, inspect enough surrounding code to identify the existing helper, shared component, fixture builder, or local extraction point that should own the repeated logic. If no reasonable shared home exists, do not force an abstraction; report only when the pasted duplication is blunt and materially likely to drift.
+
 If the diff touches Playwright specs, or the plan references existing specs:
 - inspect the relevant spec diffs
 - inspect the current spec(s) they replace or modify
@@ -123,6 +152,15 @@ Look for partial fixes where:
 - readiness state changed but approval flow did not
 - drawer state changed but navigation guard did not
 - one panel reflects a new rule while another still uses the old rule
+- the same new behavior was copied into multiple places instead of using an existing shared helper/component, making later behavior or wording updates likely to diverge
+
+For Tellis W/G/M and accounting locks, compare the diff against the canonical ownership chain named by the plan. Check that:
+- W remains the long-lived workflow owner and G/M remain command-scoped execution owners
+- RunItems remain the authority for claims, leases, attempts, failures, and pending accounting
+- the established domain service/repository owns lifecycle and current-artifact mutations
+- every charged provider attempt reaches canonical `usage_events` with the planned batch attribution
+- cached rollups, Redis state, pipeline-specific collections, endpoint payloads, and wrappers do not become alternate usage or lifecycle authorities
+- intentional domain differences remain adapters or durable handoff mechanisms, not second owners
 
 For Playwright or DoD-style specs, compare:
 - what behavior the old spec was trying to prove
@@ -145,6 +183,14 @@ A finding should meet both:
 - the behavior is user-visible or workflow-visible
 - it conflicts with the plan or an explicit user decision, or creates a clear inconsistency in the visible product
 
+For an explicit Tellis single-owner lock, a parallel W/G/M, current-artifact, or accounting mechanism is a **High** workflow regression by itself. Do not require separate UI impact. Report the competing path, the canonical owner it bypasses or duplicates, and whether the fix should remove the path or convert it into a projection/transport.
+
+For blunt copy-paste duplication findings, use this separate bar:
+- the duplication is introduced or substantially expanded by the current staged/unstaged diff
+- it appears in one or more touched files
+- it is large or specific enough that future changes would likely need coordinated edits in multiple places
+- it duplicates behavior, validation, mapping, UI, or test setup that has a reasonable shared home or should be locally extracted
+
 For spec-only findings, require an extra bar:
 - the spec drift materially weakens confidence in the intended behavior, or
 - the spec now enshrines behavior that conflicts with the plan intent
@@ -162,8 +208,14 @@ For each finding include:
 - file reference with line numbers
 - whether it is in `unstaged`, `staged`, or `both`
 
+For blunt copy-paste duplication findings, also include:
+- the duplicated locations
+- the shared helper/component/fixture/extraction point that should own the behavior when obvious
+
 After findings, include:
 - `No additional visible regressions found` if applicable
+- `No blunt copy-paste duplication found across touched files` if the duplicate-code pass found nothing reportable
+- `No parallel W/G/M or accounting ownership found` when a Tellis durable-workflow ownership check was applicable and passed
 - residual risks or validation gaps only if they matter
 
 If Playwright specs were part of the review surface, briefly note whether the spec changes appear:

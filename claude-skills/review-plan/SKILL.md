@@ -169,6 +169,15 @@ Read the relevant Caddyfile and confirm the new route is included in the plan. M
 - Backend must start even if Redis is down (graceful degradation)
 - Cache keys: `{service}:{tenant_id}:{resource}`
 
+**IF the plan adds any LLM call site, vendor integration, or pipeline stage (BackendAPP, QFO, CacheServiceAPP, Apify actors) — CRITICAL**
+`usage_events` is the single authoritative record for all LLM token spend and Apify vendor cost. Every new call site must satisfy all of the following:
+1. **Mint or reuse a batch document** — every durable generation or modification run must anchor to a `batches` document. Agent conversations use `agent_conversation` batch type, persist `batch_id` on `agent_log`, and reuse the same batch across all `usage_events` for the conversation.
+2. **Emit a `usage_event`** with the correct `batch_id` for every call.
+3. **Accumulate all retry attempts** — every charged attempt (including truncated retries) must be emitted as a separate `usage_event`. Never emit only the final successful attempt.
+4. **Never use batch rollup fields as source of truth** — rollup fields on `batches` are cached summaries; all spend calculations must query `usage_events` directly.
+5. **`cache.post()` sites** must unpack HTTP status and log recoverable payloads on 4xx/5xx — rejections must not be treated as success.
+6. **M-batch inserts** must clear their batch ID on both exception and HTTP rejection to prevent phantom batch references in `usage_events`.
+
 ## Output format
 
 ### Summary

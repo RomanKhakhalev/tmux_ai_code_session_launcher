@@ -2,7 +2,7 @@
 name: linear-project
 description: Log an implementation plan to Linear. Derives the ownership domain from the workspace initiative taxonomy, decides whether to create a new project or add an issue to an existing one, and attaches the full plan and codebase scope to the created issue. Triggers on "create linear project", "log to linear", "add to linear", or any implementation plan passed with a request to track it. For raw bug descriptions without a plan, use /linear-bug instead.
 user-invocable: true
-allowed-tools: AskUserQuestion, Bash, Read, Glob, mcp__linear__list_initiatives, mcp__linear__list_projects, mcp__linear__get_project, mcp__linear__get_issue, mcp__linear__save_project, mcp__linear__save_issue, mcp__linear__create_document, mcp__linear__update_document, mcp__linear__list_issue_statuses, mcp__linear__list_teams, mcp__linear__list_documents, mcp__linear__get_document
+allowed-tools: Bash, Read, Glob, mcp__linear__list_initiatives, mcp__linear__list_projects, mcp__linear__get_project, mcp__linear__get_issue, mcp__linear__save_project, mcp__linear__save_issue, mcp__linear__create_document, mcp__linear__update_document, mcp__linear__list_issue_statuses, mcp__linear__list_teams, mcp__linear__list_documents, mcp__linear__get_document
 context: fork
 ---
 
@@ -172,34 +172,6 @@ Call `mcp__linear__list_projects`. Discard projects with status `Completed`, `Do
 Call `mcp__linear__list_documents` for candidate projects. If a "Codebase Scope" document exists, call `mcp__linear__get_document` and compare file overlap. Shared infrastructure files (`services/`, `Caddyfile`, `config.ts`, `main.py`, `routes/users.py`) carry no matching signal — only count domain-specific file overlap.
 
 **Strongly prefer matching an existing project** when the plan is a bugfix, hardening pass, follow-up, or extension of an existing outcome.
-
----
-
-### Step 3b — Confirm with user
-
-Before calling any Linear MCP tools, present:
-
-```
-## Proposed Linear action
-
-**Action:** Add issue to existing project  ← or →  Create new project
-**Ownership domain:** <Initiative name> — <one-line reason why this domain>
-**Project:** <Name> (matched) / <Name> (new)
-**Justification:** <one sentence — why this is the best match, or why a new project is warranted>
-**Plan nature:** <new-capability / extension / bugfix / hardening>
-**Issue title:** <title>
-**Epic summary:** <first 2–3 sentences of the Goal section>
-**Files in scope:** <count> files
-
-Proceed? (yes / no / edit)
-```
-
-Wait for explicit confirmation:
-- `yes` / `y` — continue with Steps 4a or 4b
-- `no` / `n` — abort, explain what would have been created
-- `edit` — ask what to change, re-present before proceeding
-
-Do **not** call any MCP tools until the user confirms.
 
 ---
 

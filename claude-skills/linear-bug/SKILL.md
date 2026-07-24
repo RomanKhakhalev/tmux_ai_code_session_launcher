@@ -2,7 +2,7 @@
 name: linear-bug
 description: File a bug report to Linear. Takes a bug description, enriches it with codebase context (file paths, line numbers, root cause), synthesizes it into an implementation plan, then delegates to the linear-project skill for taxonomy routing and issue creation. Triggers on "log bug", "file bug", "report bug", or /linear-bug.
 user-invocable: true
-allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, mcp__linear__list_initiatives, mcp__linear__list_projects, mcp__linear__get_project, mcp__linear__get_issue, mcp__linear__save_project, mcp__linear__save_issue, mcp__linear__create_document, mcp__linear__update_document, mcp__linear__list_issue_statuses, mcp__linear__list_teams, mcp__linear__list_documents, mcp__linear__get_document
+allowed-tools: Read, Grep, Glob, Bash, mcp__linear__list_initiatives, mcp__linear__list_projects, mcp__linear__get_project, mcp__linear__get_issue, mcp__linear__save_project, mcp__linear__save_issue, mcp__linear__create_document, mcp__linear__update_document, mcp__linear__list_issue_statuses, mcp__linear__list_teams, mcp__linear__list_documents, mcp__linear__get_document
 context: fork
 ---
 

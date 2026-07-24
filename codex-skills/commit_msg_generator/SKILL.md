@@ -102,14 +102,16 @@ Before composing the footer, resolve Linear issue context in this order:
 
 1. Explicit user-provided issue IDs
 2. TEL issue IDs parsed from the active tmux session name, if tmux is available
-3. Existing `.linear-issue` content as fallback
+3. TEL issue IDs already known from current thread context, if tmux discovery is unavailable
+4. Existing `.linear-issue` content as fallback
 
 Rules:
 
 - Treat `.linear-issue` as the canonical file name. Do not create or read `.linear_issue`.
 - Resolve the worktree root with `git rev-parse --show-toplevel` and read or write `<repo-root>/.linear-issue`.
 - If the user explicitly provides one or more Linear issue IDs, use those IDs as authoritative and skip tmux discovery.
-- Otherwise, if running inside tmux, read the session name with `tmux display-message -p '#S' 2>/dev/null`.
+- Otherwise, always attempt tmux discovery before any fallback by running `tmux display-message -p '#S' 2>/dev/null`; if the command fails, returns empty output, or the session name does not clearly encode TEL issue IDs, treat tmux discovery as unavailable.
+- If tmux discovery is unavailable, use TEL issue IDs already known from current thread context before falling back to `.linear-issue`. Current thread context can include prior tool results, summaries after compaction, or explicit assistant/user statements that identified the active tmux session, branch, worktree, or TEL issue list. Only use IDs that were clearly established in the thread; do not infer from a branch name, directory name, plan filename, or vague mention.
 - Parse TEL issue identifiers from tmux session names using the same shared-prefix logic as `prepare-to-tels-in-tmux`.
 - Support both of these forms:
   - `TEL261_262`
@@ -122,7 +124,7 @@ Rules:
   - Deduplicate repeated numbers.
   - If the session name does not clearly encode TEL issue IDs, treat tmux discovery as unavailable instead of guessing.
 
-When TEL issue IDs are available from the explicit user request or tmux parsing:
+When TEL issue IDs are available from the explicit user request, tmux parsing, or current thread context fallback:
 
 - Resolve each issue title from existing context first.
 - Existing context includes:
@@ -133,7 +135,7 @@ When TEL issue IDs are available from the explicit user request or tmux parsing:
   - `TEL-123: Short issue title`
 - If Linear lookup fails but the ID is known, keep the bare ID rather than inventing a title.
 
-When at least one issue was resolved from explicit IDs or tmux parsing:
+When at least one issue was resolved from explicit IDs, tmux parsing, or current thread context fallback:
 
 - Rewrite `<repo-root>/.linear-issue` with one line per resolved issue.
 - Use the resolved issue order.
@@ -143,7 +145,7 @@ When at least one issue was resolved from explicit IDs or tmux parsing:
   - `TEL-261: First issue title`
   - `TEL-262: Second issue title`
 
-If no explicit or tmux-derived issue IDs are available:
+If no explicit, tmux-derived, or thread-context-derived issue IDs are available:
 
 - Do not modify `.linear-issue`.
 - Use the existing `.linear-issue` content as-is if it exists.
