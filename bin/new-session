@@ -51,13 +51,20 @@ resolve_helper() {
 
 open_tmux_session() {
   local session_name="$1"
+  local current_pane
 
-  if [[ -n "${TMUX:-}" ]]; then
-    tmux switch-client -t "$session_name"
-    return
+  if [[ -n "${TMUX:-}" && -n "${TMUX_PANE:-}" ]]; then
+    current_pane="$(tmux display-message -p -t "$TMUX_PANE" '#{pane_id}' 2>/dev/null || true)"
+    if [[ "$current_pane" == "$TMUX_PANE" ]]; then
+      tmux switch-client -t "$session_name"
+      return
+    fi
   fi
 
-  exec tmux attach-session -t "$session_name"
+  # Stale tmux environment variables can survive in macOS terminal shells even
+  # when no tmux client owns the current TTY. Remove them so attach-session
+  # creates a real client instead of treating the shell as nested inside tmux.
+  exec env -u TMUX -u TMUX_PANE tmux attach-session -t "$session_name"
 }
 
 RECREATE=false
@@ -112,10 +119,7 @@ if [[ -z "$BASE" ]]; then
 fi
 
 WORKTREE_PATH="$REPO_ROOT/.worktrees/$NAME"
-TAB_REFRESH_BIN="$(resolve_helper tmux-tab-refresh)"
-TAB_WATCH_BIN="$(resolve_helper tmux-tab-watch)"
-COPY_BIN="$(resolve_helper tmux-copy)"
-WINDOW_LABEL_BIN="$(resolve_helper tmux-window-label)"
+SESSION_CONFIGURE_BIN="$(resolve_helper tmux-session-configure)"
 
 link_shared_file_if_present() {
   local source_path="$1"
@@ -212,6 +216,7 @@ link_node_modules_if_present
 
 export TMUXP_NAME="$NAME"
 export TMUXP_WORKTREE="$WORKTREE_PATH"
+TMUXP_CONFIGURE_COMMAND="$(shell_join "$SESSION_CONFIGURE_BIN" "$NAME")"
 
 # Substitute env vars into a temp file without relying on envsubst.
 RENDERED_TMUXP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tmuxp-XXXXXX")"
@@ -219,35 +224,8 @@ TMPFILE="$RENDERED_TMUXP_DIR/feature.yaml"
 sed \
   -e "s|\${TMUXP_NAME}|$(escape_sed_replacement "$TMUXP_NAME")|g" \
   -e "s|\${TMUXP_WORKTREE}|$(escape_sed_replacement "$TMUXP_WORKTREE")|g" \
+  -e "s|\${TMUXP_CONFIGURE_COMMAND}|$(escape_sed_replacement "$TMUXP_CONFIGURE_COMMAND")|g" \
   "$TMUXP_TEMPLATE" > "$TMPFILE"
 trap 'rm -rf "$RENDERED_TMUXP_DIR"' EXIT
 
-tmuxp load "$TMPFILE" -d
-
-# Render each tab through a helper so active, inactive, and attention states can
-# use distinct colours across terminal platforms.
-WINDOW_LABEL_FORMAT="#($(shell_join "$WINDOW_LABEL_BIN") \"#S\" \"#I\" \"#W\" \"#{window_active}\")"
-
-tmux set-option -t "$NAME" mouse on
-tmux set-option -t "$NAME" status-style "fg=#CCCCCC,bg=#1A1A1A"
-tmux set-option -t "$NAME" status-left "#[fg=#CCCCCC,bg=#1A1A1A,bold] #S  "
-tmux set-option -t "$NAME" status-left-length 40
-tmux set-option -t "$NAME" status-interval 3
-tmux set-option -t "$NAME" status-right " %H:%M "
-tmux set-option -t "$NAME" set-titles on
-tmux set-option -t "$NAME" set-titles-string "tmux attach -t $NAME"
-tmux set-option -w -t "$NAME" window-status-style "fg=colour245,bg=colour234"
-tmux set-option -w -t "$NAME" window-status-format "$WINDOW_LABEL_FORMAT"
-tmux set-option -w -t "$NAME" window-status-current-format "$WINDOW_LABEL_FORMAT"
-tmux set-hook -t "$NAME" after-select-window "run-shell \"$(shell_join "$TAB_REFRESH_BIN" "$NAME")\""
-tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
-tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
-tmux bind-key -T copy-mode DoubleClick1Pane select-pane \; send-keys -X select-word \; run-shell -d 0.3 \; send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
-tmux bind-key -T copy-mode-vi DoubleClick1Pane select-pane \; send-keys -X select-word \; run-shell -d 0.3 \; send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
-tmux bind-key -T copy-mode TripleClick1Pane select-pane \; send-keys -X select-line \; run-shell -d 0.3 \; send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
-tmux bind-key -T copy-mode-vi TripleClick1Pane select-pane \; send-keys -X select-line \; run-shell -d 0.3 \; send-keys -X copy-pipe-and-cancel "$(shell_join "$COPY_BIN")"
-
-tmux select-window -t "$NAME:0"
-"$TAB_REFRESH_BIN" "$NAME" || true
-tmux run-shell -b "$(shell_join "$TAB_WATCH_BIN" "$NAME")"
-open_tmux_session "$NAME"
+tmuxp load "$TMPFILE"

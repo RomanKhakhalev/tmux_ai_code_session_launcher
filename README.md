@@ -78,9 +78,9 @@ What `new-session` does:
 3. Symlinks any existing `node_modules` directories next to tracked `package.json` files into the same relative paths in the worktree
 4. Starts a tmux session named `<name>` with three windows:
    - `claude` running `claude --effort high`
-   - `codex` running `codex -c 'model_reasoning_effort="high"'`
+   - `codex` running `codex -c 'model_reasoning_effort="high"' '$prepare-to-tels-in-tmux'`
    - `console` running a plain shell
-5. Opens the session by attaching from a normal shell, or switching clients when run from inside tmux
+5. Opens the session directly through tmuxp, or switches clients when opening an existing session from inside tmux
 
 If you omit `[base-branch]`, `new-session` now uses the currently checked-out branch in the main repo instead of assuming `develop`.
 

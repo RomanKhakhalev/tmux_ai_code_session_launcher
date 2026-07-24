@@ -5,6 +5,7 @@
 # To add a new session type: duplicate this file, adjust windows/panes/colours.
 
 session_name: "${TMUXP_NAME}"
+before_script: "${TMUXP_CONFIGURE_COMMAND}"
 
 windows:
 
@@ -18,7 +19,7 @@ windows:
     start_directory: "${TMUXP_WORKTREE}"
     panes:
       - shell_command:
-          - codex -c 'model_reasoning_effort="high"'
+          - codex -c 'model_reasoning_effort="high"' '$prepare-to-tels-in-tmux'
 
   - window_name: "console"
     start_directory: "${TMUXP_WORKTREE}"
