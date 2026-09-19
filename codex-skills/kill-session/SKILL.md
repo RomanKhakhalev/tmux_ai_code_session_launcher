@@ -1,6 +1,6 @@
 ---
 name: kill-session
-description: Safely close the current feature session by checking for merge conflicts, uncommitted changes, unmerged commits, and related Linear issue state, then requiring explicit user confirmation of the exact worktree to delete, confirmation that the work has been merged or intentionally abandoned, and confirmation that the linked Linear issue is closed before removing the worktree and killing the tmux session. Use when the user says "kill session", "close session", "close feature", "/kill-session", or otherwise wants to tear down the current feature worktree without losing work accidentally.
+description: Safely close the current feature session by checking git state and ensuring its linked Linear issue has a Product Domain label, an attached project, and a closed state before requiring confirmation to remove the worktree and tmux session. Use when the user says "kill session", "close session", "close feature", "/kill-session", or otherwise wants to tear down the current feature worktree without losing work accidentally.
 ---
 
 Safely tear down the active feature worktree. Prevent accidental data loss first, then clean up git, Linear, and tmux in that order.
@@ -19,9 +19,11 @@ Apply these checks in order:
 | Unmerged commits | Any commit on the current branch not in `roman` | Block. Show commits and ask whether to abandon or keep the branch open. If there are no unmerged commits, do not ask a merge/abandon question. |
 | Worktree target | Before any destructive action | Block until the user explicitly confirms the exact worktree and branch to delete. |
 | Merge/abandon state | Before any destructive action | Block until the user explicitly confirms the work has been merged elsewhere or should be abandoned. |
+| Product Domain label | Linked issue has no label in the `Product Domain` group | Add the appropriate child label before teardown. If the domain is not clear, ask the user to choose it. |
+| Linear project | Linked issue is not attached to a project | Attach it to a clearly relevant existing project. If none exists, request explicit permission before creating one. |
 | Open Linear issue | Linked issue not in `Done` or `Cancelled` | Block until the issue is closed or the user explicitly confirms there is nothing to close. |
 
-Do not bypass merge conflicts. All other blocks require explicit user confirmation before destructive cleanup.
+Do not bypass merge conflicts. All remaining destructive-cleanup blocks require explicit user confirmation; Linear label and project updates follow the authorization rules below.
 
 ## Workflow
 
@@ -137,10 +139,22 @@ Run:
 cat .linear-issue 2>/dev/null
 ```
 
-If the file is missing, empty, or Linear reads fail, skip this step silently.
+If the file is missing or empty, state that no linked Linear issue was found and continue. If an issue ID is present but Linear cannot read it, stop: the required issue checks cannot be completed.
 
 If an issue ID is present:
-- Read the issue.
+- Read the issue, including its labels and project.
+- List the workspace issue labels to identify children whose `parent` is `Product Domain`. Do not apply the `Product Domain` label group itself; apply a child domain label.
+- If the issue has none of those labels:
+  - Determine the appropriate domain from the issue title, description, linked branch/worktree, and current changes.
+  - When one domain is clear, add that label to the issue and report the result.
+  - When the appropriate domain is ambiguous, stop and ask the user which `Product Domain` label to use. Do not guess just to complete teardown.
+- If the issue has no project:
+  - Search non-archived existing projects using the issue title, description, domain label, team, and related/sibling issue context.
+  - If one project is clearly relevant, attach the issue to it and report the result. Do not attach to an unrelated project solely to satisfy this check.
+  - If multiple projects are plausible, stop and ask the user which existing project to use.
+  - If no suitable project exists, stop and ask for explicit permission to create a new project. Include the proposed project name, team, and brief scope in that request. Do not create a project without that permission.
+  - After the user explicitly approves creation, create the project, attach the issue, and report both results.
+- Re-read the issue after any label or project update. Do not proceed until it has at least one `Product Domain` child label and an attached project.
 - If its state is `Done` or `Cancelled`, state that the linked Linear issue is already closed and continue.
 - Otherwise ask: `Linear issue [ID] - [Title] is still open. Mark it Done now?`
 - If the user says `Done` or otherwise approves closure, update the issue state to `Done` and continue. Do not ask for a second confirmation after the issue has been closed.

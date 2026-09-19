@@ -1,393 +1,244 @@
 ---
 name: review-plan
-description: Review an implementation plan before coding starts, using the current user thread, confirmed decision locks, targeted codebase reads, recent Linear history, and conditional MongoDB data checks to catch divergence, errors, missing prerequisites, bypassed domain services, inefficiencies, Tellis-specific pattern breaks, and weak spots that could trigger reviewer churn or UX regressions later.
+description: Review a Tellis implementation plan before coding to prevent drift from the user thread, confirmed decisions, current code, data reality, and established ownership or accounting boundaries. Use when asked to review, validate, or gate a plan; report only material blockers and regression risks, not minor implementation choices.
 ---
 
-You are a senior engineer reviewing an implementation plan before any code is written. Your job is to catch bad assumptions, missing prerequisites, pattern violations, and conflicts with prior work so execution is clean.
+Review the implementation plan as an intent and drift-control artifact. Do not write code unless the user explicitly switches to implementation.
 
-This skill is for plan review only. Do not write code unless the user explicitly switches from review to implementation.
+## Review standard
 
-Keep the review signal-dense:
-- Read the plan carefully before searching.
-- Re-read the plan file immediately before the review starts so the current file contents, not memory, drive the review.
-- Verify claims against code before flagging them.
-- Treat explicit user decisions and confirmed locks in the current thread as binding review constraints.
-- Preserve the intended size of the change. A plan review must not silently turn a focused fix into a cross-service redesign, generalized hardening project, migration, or architectural cleanup.
-- If a finding would materially expand the requested scope, pause and consult the user before treating that expansion as required or gate-blocking.
-- Do not retain findings that introduce additional services, files, endpoints, save paths, migrations, or ownership refactors unless verified evidence shows they are necessary to fix the reported defect safely, satisfy a confirmed lock, or prevent a concrete regression in an already affected path.
-- Prefer a small number of strong findings over a broad dump of weak guesses.
-- Do not pad the review with loosely related Linear or Mongo observations.
-- Look for weak spots where the engineer has not locked in a design choice and a reviewer is likely to later push an alternative implementation or UX wording.
+- Re-read the plan from disk immediately before reviewing it.
+- Treat explicit user decisions, rejected alternatives, and later corrections in the current thread as binding. Do not promote brainstorming or unanswered questions into locks.
+- Verify claims against code or data before flagging them.
+- Preserve the requested scope. Do not turn a focused change into generalized hardening, migration, or architecture work.
+- Require material refactoring or architecture expansion to earn its scope through concrete product or maintenance value. Verified tech-debt reduction counts as value when it removes duplication, competing ownership, recurring incident risk, or ongoing maintenance burden; aesthetic cleanup and speculative future flexibility do not.
+- Require the plan to lock outcomes, ownership, invariants, integration boundaries, visible UX, and material operational constraints.
+- Leave implementation-equivalent choices to coding and code review. Do not flag style, local naming, helper placement, file shape, or speculative implementation details unless they create a verified material risk.
+- Prefer a few strong findings. Omit empty sections and optional observations.
 
-The review must end with a binary implementation gate:
-- `GATE:fail` if the plan has any blocking issue that should be fixed before implementation starts
-- `GATE:pass` if no blocking issue remains
+Retain a finding only when it is:
 
-Treat these as blocking by default:
-- Anything listed under `Errors`
-- Any explicitly critical pattern break
-- Any plan that adds or changes production LLM/provider/vendor calls without an explicit `usage_events` accounting path, batch attribution decision, and focused test/guardrail coverage
-- Any Mongo data reality finding that makes the planned implementation unsafe or materially incorrect without a plan change
-- Any unresolved weak spot where multiple plausible designs exist and the lack of a locked decision is likely to cause implementation churn, reviewer reversals, or visible UX drift
-- Any plan step that contradicts, weakens, omits, or silently reopens an explicit user decision or confirmed lock from the current thread
-- Any unjustified bypass of an established class or domain service that owns the affected behavior, invariants, persistence, accounting, or integration boundary
-- Any Tellis durable-workflow plan that does not explicitly forbid parallel ownership of W/G/M lifecycle, current-artifact identity, or accounting totals when it extends an established pipeline
-- Any proposed route, worker, collection, Redis record, wrapper, or compatibility path that can become a second W/G/M or usage-accounting owner without an explicit replacement, migration, and deprecation plan
+1. required to implement a confirmed decision;
+2. necessary for correctness or safety within the existing scope;
+3. a concrete regression risk in a path the plan changes; or
+4. a verified violation of an established ownership, persistence, routing, security, lifecycle, or accounting boundary; or
+5. a material refactoring or subsystem whose delivery, regression, or operational cost is not justified by concrete product benefit or net maintenance-value improvement.
+
+Drop optional cleanup, future-proofing, generalization, defense in depth, and minor inconsistencies. If a required correction would materially expand scope, explain why the smaller boundary is unsafe and obtain a user decision before making it gate-blocking.
+
+## Gate
+
+Start the response with exactly:
+
+- `GATE:fail` when a material blocker must be fixed before implementation.
+- `GATE:pass` when no material blocker remains.
+
+Fail for:
+
+- a contradiction, omission, or reopening of a confirmed user lock;
+- a verified false assumption or missing prerequisite that makes the plan unsafe or materially incorrect;
+- broken cross-step or cross-service data flow;
+- an unjustified bypass or duplication of an established domain owner;
+- a required CacheServiceAPP or VectorSearchAPP Caddy route omission;
+- unsafe Mongo assumptions verified against real data;
+- a changed production provider call without required usage accounting and tests;
+- parallel W/G/M, current-artifact, batch, or usage-accounting ownership;
+- material refactoring or architecture expansion whose product or maintenance value does not justify its delivery, regression, and operational cost;
+- a genuinely material unresolved decision likely to change UX, domain behavior, ownership, persistence, rollout, or a cross-service contract.
+
+Do not fail for details that can be settled during implementation without changing the agreed outcome or boundaries.
 
 ## Workflow
 
-### 1. Parse the plan
-Before extracting anything, re-open and re-read the plan file from disk immediately before the review starts. Do not rely on notes, prior reads, or thread memory if the file may have changed.
+### 1. Reconcile intent and scope
 
-Extract a structured inventory:
-- Explicit user decisions, rejected alternatives, and confirmed locks from the current thread
-- Files to create or modify
-- New endpoints, functions, background jobs, or UI tabs
-- Services/components affected (`FrontendAPP`, `BackendAPP`, `CacheServiceAPP`, `CrawlerAPP`, `VectorSearchAPP`, etc.)
-- External dependencies introduced
-- Data flow changes
-- Any new or changed production LLM/provider/vendor calls, including OpenAI, Gemini, Anthropic, Bedrock, Apify, SERP provider calls, Agent calls, QFO/content-gap calls, cleanup/enrichment calls, retries, or background jobs
-- Usage tracking and cost-accounting impacts: `usage_events` emissions, batch creation/reuse/finalization, usage rollups, retry/failure accounting, Admin usage reporting, and guardrail tests
-- Key domain terms and feature names
+Read the current plan and thread. Extract:
 
-If the plan does not explicitly name files, infer the likely files from the codebase before judging the plan.
+- intended outcome and smallest reasonable scope;
+- confirmed decisions and rejected alternatives;
+- affected services, files, endpoints, jobs, UI surfaces, dependencies, and data flows;
+- new or changed provider calls, durable workflows, persistence, and operational exposure.
 
-### 1a. Reconcile the plan with the user thread
-Before searching Linear or judging implementation details, compare the plan against the current thread.
+Map each relevant lock to the plan step that implements it. Flag only material contradictions, omissions, unacknowledged scope changes, or ambiguity that permits outcome drift.
 
-Extract only explicit evidence:
-- User-confirmed behavior, UX wording, scope boundaries, ownership decisions, and technical locks
-- Alternatives the user explicitly rejected
-- Follow-up corrections that supersede earlier discussion
+### 2. Gate scope against value
 
-Then map every relevant lock to the plan step that implements it. Flag explicitly when the plan:
-- Contradicts a confirmed lock
-- Omits a confirmed requirement
-- Reintroduces a rejected alternative
-- Broadens or narrows scope without acknowledging the change
-- Uses ambiguous wording that allows implementation to drift from the confirmed behavior
+Separate changes directly required for the requested outcome from refactoring, generalized hardening, new infrastructure, or architecture expansion.
 
-Do not treat brainstorming, assistant suggestions, or unanswered questions as confirmed locks. When thread evidence is ambiguous, describe the ambiguity under `Decision locks`; do not invent user intent.
+For each material scope addition, verify a concrete benefit:
 
-### 1b. Enforce scope discipline before expanding the review
-Establish the smallest reasonable implementation boundary from the issue, current thread, and plan before tracing adjacent systems.
+- direct user or product value;
+- removal of verified duplication or competing ownership;
+- measurable reduction in recurring maintenance, incident, operational, or delivery cost;
+- necessary simplification that leaves the affected system with less net complexity.
 
-Classify each potential finding as one of:
-- Required inside the existing scope to fix the defect safely
-- Required by an explicit user decision or confirmed lock
-- A concrete regression risk in a path already changed by the plan
-- Optional hardening, cleanup, generalization, or architectural improvement
+Compare the plan with the smallest safe implementation that preserves the confirmed outcome and established boundaries. Count tech-debt reduction as valid maintenance value, but assess the net result: moving complexity, adding abstraction around one use case, or building speculative extensibility is not debt reduction.
 
-Only the first three categories may become findings. Drop the fourth category from the review rather than converting it into a requirement.
+Fail the gate when material refactoring or a new subsystem substantially expands the change without evidence that its product or net maintenance value outweighs implementation cost, regression surface, operational burden, and future ownership. Do not fail small local refactors that are necessary to implement the outcome safely or that plainly reduce complexity in the touched path.
 
-Treat scope expansion as significant when a finding would require any of the following beyond the plan's intended boundary:
-- A service or application not otherwise needed for the defect fix
-- Additional producers, consumers, routes, workers, save paths, or UI surfaces not implicated by the defect
-- A migration, backfill, compatibility framework, generalized validation contract, or new cross-service payload
-- Reassignment of established domain, persistence, lifecycle, W/G/M, or accounting ownership
-- A broad refactor whose value is primarily consistency, future-proofing, or defense in depth
+### 3. Check targeted prior work
 
-Before including such an expansion as an `Error`, `Pattern break`, `Decision lock`, or gate blocker:
-1. Verify a concrete failure mode in the current defect path or a direct conflict with a confirmed lock.
-2. Explain why the defect cannot be fixed safely within the smaller boundary.
-3. Consult the user and obtain an explicit scope decision.
+Search Linear only when history could constrain the plan:
 
-If the user has not approved the expansion, do not fail the plan for omitting it. Drop the expansion finding or identify it only as optional follow-up work when the user explicitly asks for follow-up recommendations. Never infer that making an invariant universal is required merely because enforcing it universally would be architecturally cleaner.
+- Search the last 180 days with 2-3 exact domain/component queries.
+- Fetch at most 5 issues per query and 10 total.
+- Read comments for at most 2 clearly relevant issues.
+- Keep only prior decisions, same-path regressions, or intentionally opposite approaches.
+- Discard connections requiring more than one inferential hop.
 
-### 2. Check recent Linear history
-Search for prior issues that touched the same components, files, or domain concepts. The goal is to surface past decisions, known bugs, and implementation constraints.
+Omit prior work if nothing material survives.
 
-Rules:
-- Search only the last 180 days (`updatedAt: -P180D`).
-- Use 2-3 targeted queries derived from the parsed plan. Prefer exact component/domain phrases over broad terms.
-- Fetch at most 5 issues per query and 10 issues total.
-- Read title and description first.
-- If an issue is clearly relevant but the decision context is incomplete, read comments for at most 2 issues if comment access is available.
-- Skip routine tickets in `Done`/`Cancelled` unless the description or comments contain a real decision, regression, or constraint.
-- Discard any issue whose connection to the plan requires more than one inferential hop.
+### 4. Verify code and paths
 
-Extract only:
-- Decisions that constrain the current plan
-- Past bugs in the same area that could recur
-- Conflicts where prior work intentionally chose the opposite approach
+Confirm named paths, symbols, routes, models, helpers, and contracts. Read representative call sites before judging.
 
-If no strong issue survives filtering, state `No relevant Linear history found`.
+Identify the current owner of each affected invariant:
 
-### 3. Verify file paths and structure
-For every file path in the plan:
-- Confirm whether it exists if it should already exist.
-- Flag paths that are missing, renamed, or structurally wrong.
-- If the plan omits paths, identify the actual files that would need to change.
+- domain or orchestration service;
+- repository/data manager;
+- provider/integration client;
+- validation, normalization, persistence, caching, lifecycle, or accounting helper.
 
-### 4. Read the current code before judging
-Before calling out an error or pattern break, read the relevant files to confirm the issue is real.
+Flag a bypass only when it would duplicate behavior, split writes or invariants, or establish a competing owner. Do not demand an abstraction merely because a similarly named class exists.
 
-Do not guess about:
-- Function/class names
-- Route organization
-- Existing request/response models
-- Cache helpers
-- Tab wiring
-- Caddy routing
-- Data flow contracts
+### 5. Check Mongo conditionally
 
-For every affected behavior, identify the existing ownership boundary before approving a new helper or direct implementation:
-- Domain classes and models
-- Domain services and orchestration services
-- Repository/data-manager abstractions
-- Provider and integration clients
-- Shared validation, normalization, persistence, caching, usage-accounting, and lifecycle helpers
+Use read-only Mongo access only when the plan changes queries, schemas, writes, migrations, backfills, IDs, or page/product linking.
 
-Trace representative call sites to determine whether the plan reuses the owner or bypasses it. Flag direct route-level, job-level, or UI-level logic that duplicates or circumvents an established owner, especially when this would split invariants or create two write paths. Do not demand abstraction reuse merely because a similarly named class exists; verify that it actually owns the relevant responsibility.
-
-### 5. Check actual MongoDB data when the plan touches persistence
-This step is conditional. Run it only if the plan changes Mongo queries, inserts, updates, schemas, migrations, backfills, `_id`/`client_id` handling, or page/product linking.
-
-Rules:
-- Inspect only the directly affected collections.
-- Check schema and index metadata first.
+- Inspect only affected collections.
+- Check schema/index metadata first.
 - Sample 3-5 documents with narrow projections.
-- Verify field names, BSON types, nullability, nesting, and legacy variants.
-- Report only findings that materially affect the plan.
+- Verify BSON types, nullability, nesting, indexes, and legacy variants.
+- Report only facts that materially change the plan.
 
-Look specifically for Tellis conventions and common drift:
-- `client_id` stored as `ObjectId`
-- `usage_events.batch_id` type-compatible with `batches._id` when the plan touches usage accounting or durable batch workflows
-- Page references stored as strings and converted to `ObjectId` before querying
-- `created_at` / `updated_at` instead of introducing new `generated_at`
-- Product lookup patterns that may need both `product` and `name`
-- Legacy or mixed-shape documents that require migration or defensive reads
+Relevant Tellis invariants:
 
-If the data matches the planned assumptions closely enough, omit this section instead of adding noise.
+- Store and query `client_id` as `ObjectId`.
+- Keep `usage_events.batch_id` join-compatible with `batches._id`.
+- Convert string page/document references before direct Mongo queries.
+- Use `created_at` and `updated_at`; do not add `generated_at`.
+- Verify mixed legacy shapes rather than assuming them.
 
-### 5a. Compare batch W/G/M and usage accounting across content pipelines
-Run this check whenever the plan touches a durable pipeline, generation or regeneration, approval/publish mutations, retries, background execution, provider calls, or usage reporting.
+### 6. Check durable workflows and provider accounting conditionally
 
-Inspect representative current implementations for every relevant pipeline family:
-- FAQ and PDP content
-- Attribute enrichment
-- Images
-- Catalog health
+Run this check only when the plan touches generation/regeneration, approval/publish mutations, retries, background execution, provider calls, durable batches, or usage reporting.
 
-Trace each applicable flow end to end rather than relying on similarly named models or routes:
-- Entry point and background-job dispatch
-- Batch creation or reuse and the meaning of the batch owner
-- W/G/M state transitions, including approval, rejection, regeneration, and publish behavior
-- Provider-call accounting and `usage_events` emission
-- `usage_events.batch_id` attribution and rollup/finalization behavior
-- Retry, partial-success, charged-failure, cancellation, and terminal-state handling
-- CacheService repository/domain-service ownership and Admin/reporting consumers
+Trace only the closest relevant existing pipeline precedent. Compare additional families—FAQ/PDP, attribute enrichment, images, or catalog health—only when needed to resolve ownership or detect drift.
 
-Build a compact comparison matrix in working notes with pipeline family, batch type/owner, W/G/M owner, usage recorder/emitter, failure accounting, and finalization path. Use it to identify the established pattern that best matches the proposed work. Do not assume all pipelines should be identical: distinguish intentional domain differences from accidental drift.
+Require the plan to state:
 
-Require the plan to name:
-- Which existing pipeline is the precedent and why
-- The exact batch lifecycle and W/G/M owner it will reuse or extend
-- Where each production provider attempt emits `usage_events`
-- How the event remains joined to the durable batch and reaches rollups/reporting
-- Any deliberate divergence from existing FAQ/PDP, attribute enrichment, image, or catalog-health behavior
-- An explicit single-owner lock forbidding routes, workers, pipeline-specific collections, Redis records, and compatibility wrappers from becoming parallel owners of W/G/M lifecycle, current-artifact identity, or usage totals
+- the canonical batch and W/G/M owner it reuses or replaces;
+- where every billable provider attempt emits `usage_events`;
+- batch attribution, rollup/finalization, retry, partial-success, cancellation, and charged-failure behavior;
+- whether routes, workers, Redis records, pipeline documents, and wrappers are transports/projections or owners;
+- any intentional divergence and, for replacement, migration and deprecation.
 
-Do not treat partial reuse as sufficient. A plan can call `RunExecution`, `ClaimSession`, or `usage_events` and still create a competing owner elsewhere. Classify each proposed route, worker, collection, Redis record, and wrapper as either a projection/transport controlled by the canonical owner or an independent lifecycle/accounting authority.
+Fail when the plan creates or leaves room for a second W/G/M, current-artifact, batch, or usage-total owner. Do not require this analysis for workflows outside the plan.
 
-Flag a critical pattern break when the plan invents a parallel batch, W/G/M, current-artifact, or usage-accounting path, or omits the explicit single-owner lock. A parallel path is acceptable only when the plan names why the established owner cannot be reused and includes an explicit replacement, migration, compatibility, and deprecation strategy. If an applicable pipeline family does not yet implement one of these concerns, report that as evidence rather than treating the missing behavior as precedent.
+### 7. Apply Tellis hard checks
 
-### 6. Check for errors
-Look for:
-- Divergence from explicit user decisions, rejected alternatives, or confirmed locks in the current thread
-- Wrong assumptions about existing code
-- Missing prerequisites
-- Incorrect references to files, functions, models, or routes
-- Broken data flow between planned steps
-- Missing `usage_events` emission, batch attribution, charged-failure accounting, or guardrail/test updates when production LLM/provider/vendor calls are added or changed
-- Missing operational exposure such as Caddyfile changes where required
-- Direct implementations that bypass an existing class or domain service responsible for the same invariant or workflow
+Apply only checks relevant to the affected scope.
 
-Apply the scope-discipline test from step 1b before retaining any error. An adjacent path that could theoretically exhibit the same weakness is not enough: the path must be part of the requested change, directly implicated by verified defect evidence, or required by a confirmed lock. Otherwise drop the finding.
+#### Routing
 
-### 7. Check for inefficiencies
-Look for:
-- Duplicate queries or repeated fetches
-- Reimplementing existing helpers instead of reusing them
-- Recreating behavior already owned by a domain class or service instead of extending or calling that owner
-- New abstractions for one-off behavior
-- Multi-step flows that can be simplified without losing clarity
+- CacheServiceAPP Caddy uses explicit `@reads` / `@writes` allowlists.
+- VectorSearchAPP uses explicit per-route routing.
+- NlpAPP and CrawlerAPP use prefix wildcards; update only for a new prefix.
+- BackendAPP and FrontendAPP wildcard routing normally needs no Caddy change.
 
-### 8. Check for inconsistencies
-Look for:
-- Naming drift across steps
-- Contradictory steps
-- Multiple patterns for the same problem in one plan
-- API shapes that do not match the consuming layer
+#### Usage accounting
 
-### 9. Search for reviewer-churn weak spots
-Look for places where the plan is technically viable but under-specified enough that code review will likely derail implementation later.
+- `usage_events` is the canonical ledger; batch rollups are derived summaries.
+- Keep provider calls inside an approved tracked client/recorder boundary.
+- Record billed truncations, parse failures, partial/exhausted retries, and other charged failures.
+- Update payload models, routes, Caddy, reporting, and focused guardrails only where the touched contract requires them.
 
-Typical weak spots:
-- UX labels or CTA wording with multiple plausible choices
-- State transitions where one reviewer could argue for a different terminal state
-- Flows that split between two surfaces and may drift if only one is updated
-- Usage ownership where a plan could reasonably put accounting in a shared tracked client, route handler, service helper, pipeline recorder, or CacheService endpoint but does not lock the boundary
-- Retry/failure accounting where a plan says “track usage” but does not say whether charged truncated attempts, parse failures, partial retries, or vendor failures emit events
-- “Good enough for now” behavior that leaves an obvious alternative design on the table
-- Missing ownership on whether a rule lives in shared helpers, context state, or UI components
-- Mixed-content cases where one entity type is likely to be left behind by a partial fix
+#### CacheServiceAPP
 
-For each real weak spot:
-- Name the competing design options
-- Recommend the preferred option
-- Explain why that option should be locked into the implementation plan now
-- State what exact decision text the engineer should add to the plan so later reviewers do not reopen it casually
+- Use cache/invalidation-aware Mongo helpers when applicable.
+- Prefix internal helpers with `_`.
+- Use `get_redis()`; degrade gracefully when Redis is unavailable.
 
-Do not invent design debates where the codebase or plan already has a clear established pattern.
-Do not reopen a decision the user already confirmed. If current code makes the lock unsafe or impossible, report the concrete conflict under `Errors` and explain what must be renegotiated; do not silently substitute another design.
-Do not use reviewer-churn prevention to broaden a focused fix into generalized platform work. If resolving a weak spot would add services or files outside the smallest defect boundary, consult the user before retaining it as a required decision lock.
+#### Domain ownership
 
-### 10. Check Tellis codebase patterns
+- Routes validate and orchestrate; domain services own business rules and lifecycle.
+- Background and synchronous entry points should share the same owner unless a concrete boundary requires otherwise.
+- A new service or manager must have a distinct responsibility or explicitly replace and deprecate the previous owner.
 
-Apply only the relevant checks for the plan's scope.
+#### API and frontend
 
-#### Caddyfile routing
-If the plan adds or changes endpoints, confirm routing exposure rules:
+- Follow `routes/{component}.py`, `/api/{component}/{action}`, typed request/response models, and reasonable error handling when adding endpoints.
+- For a new product-detail tab, verify the product-detail type, metrics handling, all ProductDetailView variants, `useActiveInsight.ts`, and `DetailTabs.tsx`.
 
-| Service | File | Rule |
-| --- | --- | --- |
-| `serviceapps/CacheServiceAPP` | `serviceapps/CacheServiceAPP/Caddyfile` | Explicit allowlist. New routes must be added to `@reads` or `@writes`. |
-| `serviceapps/VectorSearchAPP` | `serviceapps/VectorSearchAPP/Caddyfile` | Explicit per-route routing. |
-| `serviceapps/NlpAPP` | `serviceapps/NlpAPP/Caddyfile` | Prefix wildcard. Update only if introducing a new prefix. |
-| `serviceapps/CrawlerAPP` | `serviceapps/CrawlerAPP/Caddyfile` | Prefix wildcard. Update only if introducing a new prefix. |
-| `frontend/BackendAPP` and `frontend/FrontendAPP` | No Caddy update expected | Wildcard routing already covers new paths. |
+#### Version and timestamps
 
-Missing a required `CacheServiceAPP` or `VectorSearchAPP` Caddy update is a critical error.
+- Use `PRODUCT_VERSION` as the version source.
+- Use `created_at` / `updated_at`.
 
-#### MongoDB patterns
-- `client_id` is stored as `ObjectId` in Mongo. Route code should convert incoming string IDs before direct pymongo queries.
-- `usage_events` is the canonical ledger for usage/cost accounting; `batches` are lifecycle anchors and cached rollups only.
-- `usage_events.batch_id` must stay join-compatible with `batches._id`; do not approve plans that mix string and BSON IDs for the same join contract.
-- If product lookup behavior is part of the plan, verify whether the query needs both `product` and `name` fields.
-- If page references are stored as strings, convert them to `ObjectId` before querying linked collections.
+### 8. Filter findings
 
-#### Usage tracking & cost accounting
-If the plan adds or changes production LLM/provider/vendor calls, durable generation flows, retries, background jobs, SERP crawls, Tellis Agent calls, QFO/content-gap pipelines, attribute enrichment, cleanup evaluation, Apify/vendor runs, or Admin usage reporting, confirm all of the following before passing:
-- The plan was checked against the applicable FAQ/PDP, attribute-enrichment, image, and catalog-health implementations, and names the closest precedent plus any intentional divergence in batch W/G/M or `usage_events` behavior.
-- The plan names the approved accounting boundary: tracked shared client/recorder, existing usage helper, or explicit `usage_events` emission.
-- Direct OpenAI/Gemini/Anthropic/Bedrock calls stay inside approved adapter/recorder boundaries. If a new boundary is proposed, the plan must update provider-call guardrails and allowlist entries with a reason.
-- Charged failures are explicitly handled: max-token/truncation attempts, parse failures after billed calls, partial retries, exhausted retries, and vendor runs with known cost must emit real usage/cost rather than zeros or only the final success.
-- Durable workflows have a batch decision: origin batch vs modification aggregate vs conversation batch vs pipeline/run batch, including create/reuse/finalize behavior and what happens if batch creation or CacheService writes fail.
-- Batch rollups are described as cached summaries derived from emitted events, not the source of truth.
-- CacheService/Backend model, route, Caddy, Admin reporting, and test changes are included when the usage payload shape or endpoint surface changes.
-- Focused tests or guardrails cover the touched path, such as usage event routes, token retry/max-token handling, SERP provider usage, agent usage, Apify usage, QFO/content-gap recording, Admin report aggregation, or `tests/test_llm_call_guardrails.py`.
+Before writing the review, remove any item that:
 
-Missing usage accounting in a touched production provider path is a critical pattern break and should usually make the gate fail.
+- lacks direct thread, code, data, or relevant Linear evidence;
+- concerns an unaffected adjacent path;
+- flags existing legacy behavior that the plan explicitly replaces or removes when the remaining work is straightforward implementation plumbing; retain it only if the replacement is incomplete or creates a concrete material risk;
+- merely prefers another valid implementation;
+- predicts a minor inconsistency the plan does not require;
+- asks the plan to pre-design local code;
+- expands scope without a proven current-path failure.
 
-#### CacheServiceAPP patterns
-- Reads should use cache-aware helpers such as `find_one_cached()` / `find_many_cached()` when applicable.
-- Writes should use invalidation-aware helpers such as `update_with_invalidation()` / `insert_with_invalidation()` when applicable.
-- Internal helpers should be prefixed with `_`.
+Treat inefficiency or inconsistency as a finding only when the plan explicitly mandates it and the effect is material to correctness, cost, latency, delivery, ownership, or an integration contract.
 
-#### Domain ownership and service boundaries
-- Reuse the existing class or domain service that owns the affected business rule, lifecycle, normalization, persistence, integration, or accounting behavior.
-- Routes should validate and orchestrate; they should not duplicate domain rules already encapsulated below the route layer.
-- Background jobs should call the same domain service as synchronous entry points unless the plan documents a concrete execution-boundary reason not to.
-- New services must have a distinct responsibility. Flag wrapper services, parallel managers, or direct database/provider calls that bypass an established owner without removing or intentionally superseding the old path.
-- When extending an owner is impractical, require the plan to name the existing owner, explain why it cannot be reused, and lock the replacement/deprecation strategy so both paths do not drift.
-- For Tellis W/G/M workflows, require one canonical owner for lifecycle transitions, RunItem execution state, current-artifact identity, and usage totals. Redis polling state, pipeline-specific documents, endpoint responses, and compatibility wrappers may project canonical state but must not independently create, finalize, or reconcile it.
+Create a decision lock only for a material product, UX, ownership, persistence, lifecycle, accounting, security, rollout, or cross-service choice. State the competing options and exact lock text. Do not lock implementation-equivalent mechanics.
 
-#### Frontend new-tab wiring
-If the plan adds a new product detail tab, confirm it accounts for all required files:
-- `frontend/FrontendAPP/frontend/types/productDetail.ts`
-- The tab metrics type, excluding the tab if it has no metrics
-- All three ProductDetailView files
-- `frontend/FrontendAPP/frontend/hooks/useActiveInsight.ts`
-- `frontend/FrontendAPP/frontend/components/product-detail/DetailTabs.tsx`
+## Output
 
-#### API endpoint patterns
-- Routes grouped by component under `routes/{component}.py`
-- URL shape `/api/{component}/{action}`
-- Pydantic models for request and response bodies
-- Reasonable HTTP status handling for bad input, not found, and server errors
-
-#### Redis/caching patterns
-- Use the `get_redis()` getter instead of importing a module-level `redis_client`
-- Backend services must degrade gracefully if Redis is unavailable
-- Cache keys should follow the established service/tenant/resource pattern where applicable
-
-#### Timestamp/version conventions
-If the plan touches persisted timestamps or version stamping:
-- Prefer `created_at` / `updated_at`
-- Do not introduce new `generated_at` fields
-- Use `PRODUCT_VERSION` as the source of truth for current product version references
-
-## Output format
-
-### Gate
-The first line of the output must be exactly one of:
-- `GATE:pass`
-- `GATE:fail`
-
-Do not add explanation on the gate line.
+After the gate line, include:
 
 ### Summary
-One short paragraph describing what the plan is trying to do and whether it is broadly on track.
+
+One short paragraph describing the plan and verdict.
+
+Use only the applicable sections below:
 
 ### Prior work
-Include only if relevant Linear issues survived filtering.
 
-Format:
-- **[Issue ID - Title]**: The decision, bug, or constraint this plan must account for.
-
-Omit the section entirely if there is no strong history.
+- **[TEL-ID - Title]**: Relevant decision, regression, or constraint.
 
 ### Errors
-List only issues that should be fixed before implementation starts.
 
-Format:
-- **[Affected step or file]**: What is wrong and why it matters. *Verified by reading [file:line].*
+- **[Step or file]**: Material problem, consequence, and required correction. Cite the verifying file and line when code established the finding.
+
+### Scope/value
+
+- **[Refactor or subsystem]**: Scope cost, claimed product or maintenance value, verified evidence, smallest safe alternative, and why the net value does or does not justify the expansion.
 
 ### Thread/lock divergence
-Include whenever the plan differs from the current user discussion or confirmed locks. Omit only when there is no relevant divergence.
 
-Format:
-- **[Confirmed lock → affected plan step]**: The user confirmed `<decision>`, but the plan `<contradicts/omits/reopens/narrows/broadens it>`. Required correction: `<exact plan change>`.
+- **[Confirmed lock → plan step]**: Confirmed decision, divergence, and exact correction.
 
-Any material divergence from an explicit confirmed lock must also appear under `Errors` and fail the gate.
-
-### Inefficiencies
-Format:
-- **[Step]**: What is redundant or over-engineered, and the simpler alternative.
-
-### Inconsistencies
-Format:
-- **[Steps X and Y]**: What conflicts or drifts in naming/patterns.
+Material lock divergence must also appear under `Errors` and fail the gate.
 
 ### Decision locks
-Include when the plan has weak spots that should be explicitly pinned down before implementation.
 
-Format:
-- **[Surface or step]**: Competing options are `<option A>` vs `<option B>`. Prefer `<chosen option>` because <reason>. Add this decision to the plan explicitly: `<exact lock-in text>`.
-
-If a missing decision lock is severe enough to likely trigger reviewer churn or visible UX drift, also include it under `Errors`.
+- **[Surface or step]**: Material options, preferred choice, reason, and exact text to add.
 
 ### Pattern breaks
-Format:
-- **[Pattern name]**: What the plan violates and what it should do instead.
 
-For usage-accounting pattern breaks, explicitly name:
-- the provider/vendor call or workflow being changed
-- the missing `usage_events`/batch/guardrail/test requirement
-- the established boundary or helper the plan should use
-- the compared FAQ/PDP, attribute-enrichment, image, or catalog-health precedent and whether the difference is intentional or drift
+- **[Pattern]**: Established owner or boundary, the planned bypass/drift, affected invariant, and required reuse or explicit replacement/deprecation.
 
-For class/domain-service bypasses, explicitly name:
-- the existing class or service that owns the behavior
-- the plan step or proposed code path that bypasses it
-- the invariant or behavior that would be duplicated or split
-- whether the plan should reuse/extend the owner or explicitly replace and deprecate it
+For provider accounting, name the call, missing event/batch/failure/test behavior, and established recorder boundary.
 
 ### Mongo data reality
-Include only if you actually checked Mongo and found plan-relevant shape drift or constraints.
 
-Format:
-- **[Collection]**: The real data pattern that affects the plan.
+- **[Collection]**: Verified data shape that materially changes the plan.
 
-If there are no findings in a section, omit that section instead of writing filler.
+### Inefficiencies
+
+- **[Step]**: Plan-mandated material waste and the simpler equivalent.
+
+### Inconsistencies
+
+- **[Steps]**: Material internal contradiction or incompatible contract.
+
+Omit every section with no findings.

@@ -30,9 +30,11 @@ REQUIRED STRUCTURE
 - Mention main service(s) or feature(s) affected
 - Use active voice
 - Avoid vague wording
+- When a TEL issue is available from the Linear-context workflow, promote the first resolved issue identifier to the heading in this exact form: `TEL-X: <title summary>`. Keep the title summary subject to all rules in this section; it describes the staged change and need not repeat the Linear issue title.
+- When no TEL issue is available, use the standard `<service or feature>: <title summary>` form.
 
 Example format:
-Auth Service: Add refresh token rotation and revoke compromised sessions
+TEL-123: Auth Service adds refresh token rotation and revokes compromised sessions
 
 2) DETAILED DESCRIPTION (Required for feature or behavior changes)
 

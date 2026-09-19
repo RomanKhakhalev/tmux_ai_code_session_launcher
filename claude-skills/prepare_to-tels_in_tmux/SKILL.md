@@ -2,7 +2,7 @@
 name: prepare_to-tels_in_tmux
 description: Prepare for implementing TEL issues in the current tmux session — reads the session name, parses it into issue IDs, fetches full Linear context, investigates the codebase, surfaces Playwright DoD tests if UI issues, then locks in product/design intent before drafting an implementation plan. Triggers when user says "prepare for tels", "prep session", "load issues", "/prepare_to-tels_in_tmux".
 user-invocable: true
-allowed-tools: Bash, Read, Grep, Glob, Write, EnterPlanMode, Skill, mcp__Linear__get_issue, mcp__Linear__list_issues, mcp__Linear__list_comments, mcp__Linear__get_attachment, mcp__Linear__list_attachments, mcp__Linear__get_document, mcp__Linear__list_projects, mcp__Linear__list_teams
+allowed-tools: Bash, Read, Grep, Glob, Write, Skill, mcp__Linear__get_issue, mcp__Linear__list_issues, mcp__Linear__list_comments, mcp__Linear__get_attachment, mcp__Linear__list_attachments, mcp__Linear__get_document, mcp__Linear__list_projects, mcp__Linear__list_teams
 context: inline
 ---
 
@@ -69,7 +69,9 @@ After fetching, synthesise per issue:
 
 ---
 
-## Step 2 — Investigate the codebase (no implementation)
+## Step 2 — Investigate the codebase thoroughly (no implementation)
+
+**MANDATORY DEPTH REQUIREMENT:** You must read the actual code — not just file names or grep output. For every issue, read the full bodies of the functions, routes, services, and components that are touched. A plan written from grep output alone will be wrong. Plans grounded in shallow investigation WILL be rejected.
 
 Determine the current working directory and confirm you are inside the correct worktree:
 
@@ -78,19 +80,24 @@ git worktree list
 git branch --show-current
 ```
 
-Then explore the codebase for each issue area. For each issue:
+Then for each issue, perform the following investigation in depth:
 
-1. Grep for component names, function names, or keywords from the Linear description to locate relevant files.
-2. Read the identified files to understand current behaviour, data flow, and state management.
-3. Note exact `file:line` references for the components, hooks, handlers, or routes that the issue touches.
-4. Identify any shared utilities, types, or constants that may be affected.
+1. **Locate** — grep for component names, function names, route paths, and domain keywords from the Linear description to find candidate files.
+2. **Read fully** — open each candidate file and read the relevant functions end-to-end. Understand the full data flow: where data comes from, how it is transformed, where it is persisted, and how it is consumed downstream.
+3. **Trace the call chain** — follow imports and callers at least two levels deep so the plan reflects real dependencies, not assumed ones.
+4. **Understand current behaviour precisely** — be able to state in concrete terms what the code does today, not just what it is supposed to do.
+5. **Identify adjacent code** — find shared utilities, types, constants, adapters, or tests that will need to change or that the new code must conform to.
+6. **Note exact `file:line` references** for every touchpoint — functions, routes, hooks, handlers, adapters, config fields, tests.
 
 **Do not write, edit, or create any files during this step.**
 
-Build a per-issue codebase summary:
-- Files involved
-- Current behaviour (what the code does today)
-- Suspected gap or bug (why current behaviour doesn't satisfy the issue intent)
+After completing the investigation, produce a per-issue codebase summary that you could defend line by line:
+- Files involved (with line ranges)
+- Current behaviour — what the code **actually** does today, traced from the code, not assumed
+- Exact gap — why the current code fails to satisfy the issue, referenced to specific lines
+- Adjacent patterns — what existing code the implementation must follow or not break
+
+**If after reading you discover the codebase behaves differently than the issue description implies, surface that discrepancy before planning — do not silently paper over it.**
 
 ---
 
@@ -190,9 +197,28 @@ find . -path "*/e2e/*" -name "*.spec.ts" | xargs grep -l "<component-keyword>" 2
 
 ---
 
-## Step 4 — Enter plan mode and surface understanding
+## Step 3b — Codebase understanding gate (mandatory before plan mode)
 
-Call `EnterPlanMode` now.
+Before entering plan mode, run this self-check. For each issue, you must be able to answer all of the following from memory — if you cannot, go back and read more code:
+
+1. **Which function/route/component is the entry point for this change?** (exact `file:line`)
+2. **What are the immediate callers or downstream consumers of that code?** (at least one level traced)
+3. **What data shape does it read and produce?** (field names, types, not just "an object")
+4. **What existing pattern must the new code follow?** (exact `file:line` from Step 2b)
+5. **What would break if you got this wrong?** (name at least one test, downstream consumer, or invariant)
+
+If you cannot answer any of these for a given issue, you have not read enough code. Read more, then answer.
+
+**Only when every question is answered for every issue, proceed to Step 4.**
+
+---
+
+## Step 4 — Surface understanding
+
+**Never call `EnterPlanMode` or `ExitPlanMode`.** The user controls plan mode entirely
+and will enter or exit it themselves. Do not suggest exiting it, do not ask "shall I
+proceed?" or "ready to implement?", and do not end a turn with either tool call — end
+with plain text and stop.
 
 Present a structured breakdown for each issue. Use this format:
 
@@ -267,29 +293,19 @@ Once all items are checked, summarise the locked decisions:
 - Order: [NNN → NNN → NNN if dependency order was specified]
 ```
 
-Then ask:
-
-> "All decisions are locked. Ready to create the implementation plan. Shall I proceed?"
-
-**Do not write any implementation plan until the user explicitly says yes.**
+Then stop. Report the locked decisions as plain text and end the turn. Do not append a
+readiness check, an approval request, or any variant of "shall I proceed?".
 
 ---
 
-## Step 6 — Rename session, write the plan, and launch /auto-fix-plan
+## Step 6 — Write the plan and rename the session
 
-Only execute this step after the user has explicitly confirmed "yes" to the Step 5 prompt.
+Only execute this step after the user has, unprompted, asked for the implementation plan
+to be written.
 
-**6a — Rename the tmux session to the current working directory:**
+**6a — Write the implementation plan** to `~/.claude/plan/<session-label>.md`, where `<session-label>` is the basename of the current working directory (e.g. `~/.claude/plan/TEL_544.md`). Set `_plan_path="$HOME/.claude/plan/<session-label>.md"` to the path you just wrote — 6b reuses it. Include all TEL issues, locked decisions, per-issue codebase touchpoints, patterns to reuse with exact `file:line` references, and DoD.
 
-```bash
-_plan_pwd=$(pwd)
-_session_label=$(echo "$_plan_pwd" | sed 's|.*/||')   # basename of cwd
-tmux -S /tmp/tmux-1000/default rename-session "$_session_label" 2>/dev/null \
-  || tmux rename-session "$_session_label" 2>/dev/null
-echo "Session renamed to: $_session_label"
-```
-
-**6b — Write the implementation plan** to `pr_plan.md` at the root of the current working directory. Include all TEL issues, locked decisions, per-issue codebase touchpoints, patterns to reuse with exact `file:line` references, and DoD.
+**NEVER write plan files inside the repository** — not at the repo root, not in `docs/`, not in a worktree. Plans are personal working artifacts and must stay outside the project tree, even when the repo's `.gitignore` would hide them.
 
 **MANDATORY plan structure per issue:**
 
@@ -316,6 +332,23 @@ echo "Session renamed to: $_session_label"
 
 Every step must reference a concrete existing pattern discovered in Step 2b. **Never write "implement new X" without citing "following pattern from file:line".**
 
-**6c — Launch `/auto-fix-plan`** passing the plan file path:
+**6b — Rename the tmux session to the full plan filename**, once the plan file has been
+successfully written, and bridge that name to the session's tmux environment so later
+skills (e.g. `/start_auto_with_codex`) in this same session can find the plan without
+re-deriving it:
 
-Invoke the `auto-fix-plan` skill with the path to the just-written plan file (`<cwd>/pr_plan.md`) so it immediately begins reviewing and iterating until clean.
+```bash
+_plan_filename=$(basename "$_plan_path")   # e.g. TEL_544.md — includes the .md extension
+tmux -S /tmp/tmux-1000/default rename-session "$_plan_filename" 2>/dev/null \
+  || tmux rename-session "$_plan_filename" 2>/dev/null
+tmux -S /tmp/tmux-1000/default set-environment CLAUDE_SESSION_PLAN_FILENAME "$_plan_filename" 2>/dev/null \
+  || tmux set-environment CLAUDE_SESSION_PLAN_FILENAME "$_plan_filename" 2>/dev/null
+echo "Session renamed to: $_plan_filename"
+```
+
+`CLAUDE_SESSION_PLAN_FILENAME` is set to the same value the session was just renamed to
+(the plan's basename, e.g. `TEL_544.md`) — not a full path. Consumers resolve it against
+`~/.claude/plan/` per the Step 6a convention.
+
+Then stop and report the plan path as plain text. Do not launch `auto-fix-plan` or any
+other follow-on skill unprompted — the user decides what runs next.

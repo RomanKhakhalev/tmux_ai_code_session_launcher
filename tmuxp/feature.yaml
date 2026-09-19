@@ -9,17 +9,35 @@ before_script: "${TMUXP_CONFIGURE_COMMAND}"
 
 windows:
 
-  - window_name: "claude"
+  - window_name: "fable"
     start_directory: "${TMUXP_WORKTREE}"
     panes:
       - shell_command:
-          - claude --effort high
+          - claude-subscription.sh --model claude-fable-5-1 --effort high
 
-  - window_name: "codex"
+  - window_name: "sonnet"
     start_directory: "${TMUXP_WORKTREE}"
     panes:
       - shell_command:
-          - codex -c 'model_reasoning_effort="high"' '$prepare-to-tels-in-tmux'
+          - claude-subscription.sh --model claude-sonnet-5 --effort high --permission-mode plan '/prepare_to-tels_in_tmux'
+
+  - window_name: "sol-sub"
+    start_directory: "${TMUXP_WORKTREE}"
+    panes:
+      - shell_command:
+          - codex-subscription.sh -m gpt-5.6-sol -c 'model_reasoning_effort="high"' '$prepare-to-tels-in-tmux'
+
+  - window_name: "terra-aws"
+    start_directory: "${TMUXP_WORKTREE}"
+    panes:
+      - shell_command:
+          - codex -m gpt-5.6-terra -c 'model_provider="openai"' -c 'model_reasoning_effort="high"'
+
+  - window_name: "agy"
+    start_directory: "${TMUXP_WORKTREE}"
+    panes:
+      - shell_command:
+          - agy --model gemini-3.1-pro-high
 
   - window_name: "console"
     start_directory: "${TMUXP_WORKTREE}"

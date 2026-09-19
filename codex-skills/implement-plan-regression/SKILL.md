@@ -1,6 +1,6 @@
 ---
 name: implement-plan-regression
-description: Review staged and unstaged git diffs against an implementation plan and the current agent thread history to catch visible or UX regressions, workflow drift, parallel Tellis W/G/M or accounting ownership, and violations of explicit user decisions. Use when the user asks to check a plan file against the current diff, re-run a regression review after debugging, or verify that staged/unstaged changes still match agreed UX and workflow behavior.
+description: Review the combined working-tree implementation against an implementation plan and the current agent thread history to catch visible or UX regressions, workflow drift, parallel Tellis W/G/M or accounting ownership, and violations of explicit user decisions. Use when the user asks to check a plan file against the current diff, re-run a regression review after debugging, or verify that current changes still match agreed UX and workflow behavior.
 ---
 
 # Implement Plan Regression
@@ -30,14 +30,9 @@ When available, also use:
 
 ## Review Scope
 
-Always inspect both:
-- unstaged diff: `git diff`
-- staged diff: `git diff --cached`
+Always inspect both `git diff` and `git diff --cached` so no implementation change is missed, then treat their union as one combined working-tree review surface.
 
-Treat them as one review surface, but call out whether each finding is:
-- unstaged
-- staged
-- present in both
+**Staging state is never a regression issue.** Never report, label, prioritize, or summarize whether a change is staged, unstaged, or present in both. Never call incomplete staging a blocker, risk, warning, finding, or handoff concern. Review behavior only. This rule applies even when a commit containing only the index would be incomplete; commit composition is outside this skill's scope.
 
 Prioritize:
 - visible UI regressions
@@ -54,6 +49,9 @@ Ignore:
 - pure refactors with no visible effect
 - generic code quality concerns unless they create a likely user-facing regression or are blunt copy-paste duplication introduced by the current diff
 - unrelated worktree noise
+- git staging state, partially staged files, and differences between the index and working tree
+- hypothetical future brittleness, maintenance cost, or review-churn risk when the current implementation behavior conforms to the plan
+- exact copy literals or exact-string test assertions when the plan explicitly marks that copy as non-contractual; a passing assertion for one allowed value does not narrow the product contract and is not a current regression
 - Playwright spec churn by itself when the changed spec still matches the plan intent and the revised assertions remain a reasonable DoD outline
 
 ## Workflow
@@ -186,7 +184,7 @@ A finding should meet both:
 For an explicit Tellis single-owner lock, a parallel W/G/M, current-artifact, or accounting mechanism is a **High** workflow regression by itself. Do not require separate UI impact. Report the competing path, the canonical owner it bypasses or duplicates, and whether the fix should remove the path or convert it into a projection/transport.
 
 For blunt copy-paste duplication findings, use this separate bar:
-- the duplication is introduced or substantially expanded by the current staged/unstaged diff
+- the duplication is introduced or substantially expanded by the current combined working-tree diff
 - it appears in one or more touched files
 - it is large or specific enough that future changes would likely need coordinated edits in multiple places
 - it duplicates behavior, validation, mapping, UI, or test setup that has a reasonable shared home or should be locally extracted
@@ -194,6 +192,13 @@ For blunt copy-paste duplication findings, use this separate bar:
 For spec-only findings, require an extra bar:
 - the spec drift materially weakens confidence in the intended behavior, or
 - the spec now enshrines behavior that conflicts with the plan intent
+
+Apply that bar to **current behavior**, not hypothetical future edits. A spec-only concern may be
+Medium or High only when it masks a current runtime regression or asserts behavior outside the
+plan's allowed contract. A currently passing exact-string assertion for one of several explicitly
+allowed, non-contractual messages is neither: omit it from regression findings and never fail the
+gate for it. If the user separately asks for test maintainability or cleanup, discuss it in that
+separate scope.
 
 If the spec change is justified by the plan intent, say so briefly and do not turn it into a regression finding.
 
@@ -206,7 +211,6 @@ For each finding include:
 - one-sentence impact
 - why it regressed from the plan or thread decision
 - file reference with line numbers
-- whether it is in `unstaged`, `staged`, or `both`
 
 For blunt copy-paste duplication findings, also include:
 - the duplicated locations
