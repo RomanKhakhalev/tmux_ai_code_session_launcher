@@ -5,7 +5,7 @@ description: Safely close the current feature session by checking git state and 
 
 Safely tear down the active feature worktree. Prevent accidental data loss first, then clean up git, Linear, and tmux in that order.
 
-Stay within shell commands plus Linear issue reads and updates. If `.linear-issue` exists, use Linear issue reads and updates to resolve the linked issue state.
+Stay within shell commands plus Linear issue reads and updates. Use `.linear-issue` to resolve the linked issue state when present; otherwise, derive a Linear-style issue identifier from the tmux session name when possible.
 
 ## Safety Rules
 
@@ -36,7 +36,7 @@ BRANCH=$(git branch --show-current)
 TMUX_ERROR_FILE=$(mktemp)
 SESSION=$(tmux display-message -p '#S' 2>"$TMUX_ERROR_FILE")
 TMUX_STATUS=$?
-TMUX_ERROR=$(cat "$TMUX_ERROR_FILE")
+TMUX_ERROR=$(sed -n '1,20p' "$TMUX_ERROR_FILE")
 rm -f "$TMUX_ERROR_FILE"
 
 if [ "$TMUX_STATUS" -ne 0 ]; then
@@ -49,13 +49,32 @@ if [ "$TMUX_STATUS" -ne 0 ]; then
 
   SESSION=""
 fi
+
+# `display-message` needs an attached tmux client. Agents often have no TMUX
+# environment variable even though the server and feature session still exist.
+# In that case, identify one unambiguous server-side session from the branch.
+if [ -z "$SESSION" ]; then
+  BRANCH_SESSION=$(printf '%s' "$BRANCH" | tr '-' '_')
+  SESSION_MATCHES=$(tmux list-sessions -F '#S' 2>/dev/null | awk -v branch="$BRANCH" -v normalized="$BRANCH_SESSION" '
+    $0 == branch || $0 == normalized ||
+    index($0, branch "_") == 1 || index($0, branch "-") == 1 ||
+    index($0, normalized "_") == 1 || index($0, normalized "-") == 1
+  ')
+  SESSION_MATCH_COUNT=$(printf '%s\n' "$SESSION_MATCHES" | sed '/^$/d' | wc -l | tr -d ' ')
+  if [ "$SESSION_MATCH_COUNT" -eq 1 ]; then
+    SESSION=$(printf '%s\n' "$SESSION_MATCHES" | sed -n '1p')
+    TMUX_SESSION_SOURCE=branch-match
+  else
+    TMUX_SESSION_SOURCE=unresolved
+  fi
+fi
 REPO_ROOT=$(git rev-parse --show-toplevel)
 WORKTREE_PATH=$(pwd)
 MAIN_CHECKOUT=$(git worktree list | awk 'NR==1 {print $1}')
 git worktree list
 ```
 
-If `tmux display-message` fails while `$TMUX` is set, do not treat this as no tmux session. Stop, show the tmux error, and request elevated permission to read the tmux socket. Only leave `SESSION` empty when `$TMUX` is unset or tmux reports no server/session.
+If `tmux display-message` fails while `$TMUX` is set, do not treat this as no tmux session. Stop, show the tmux error, and request elevated permission to read the tmux socket. When `$TMUX` is unset, always probe the tmux server with `tmux list-sessions`: use a session only when exactly one name equals the branch (normalizing `-` to `_`) or begins with that branch followed by `_` or `-`. Do not choose among multiple matches. Record `TMUX_SESSION_SOURCE=branch-match` when this fallback succeeds; otherwise leave `SESSION` empty for the final shutdown fallback in step 9.
 
 Treat the session as invalid if `WORKTREE_PATH` equals `MAIN_CHECKOUT`. In that case, stop and say: `This is the main checkout; kill-session only runs in a worktree.`
 
@@ -133,16 +152,30 @@ Do not continue until the user explicitly confirms.
 
 ### 6. Check the linked Linear issue
 
-Run:
+Resolve the issue identifier in this order:
 
 ```bash
-cat .linear-issue 2>/dev/null
+LINEAR_ISSUE=$(sed -n '1p' .linear-issue 2>/dev/null | tr -d '[:space:]')
+LINEAR_ISSUE_SOURCE=.linear-issue
+if [ -z "$LINEAR_ISSUE" ] && [ -n "$SESSION" ]; then
+  LINEAR_ISSUE=$(printf '%s' "$SESSION" | sed -nE 's/^([[:alpha:]]+)[_-]([0-9]+)([_-].*)?$/\1-\2/p')
+  if [ -n "$LINEAR_ISSUE" ]; then
+    LINEAR_ISSUE_SOURCE=tmux-session-ticket
+  else
+    LINEAR_ISSUE="$SESSION"
+    LINEAR_ISSUE_SOURCE=tmux-session
+  fi
+fi
 ```
 
-If the file is missing or empty, state that no linked Linear issue was found and continue. If an issue ID is present but Linear cannot read it, stop: the required issue checks cannot be completed.
+The `.linear-issue` value is authoritative when present. When it is missing or empty, first derive a Linear identifier from tmux session names such as `TEL_575_md` (`TEL-575`); otherwise, use `$SESSION` itself as a fallback. If `LINEAR_ISSUE` is empty, state that no linked Linear issue was found and continue.
 
-If an issue ID is present:
-- Read the issue, including its labels and project.
+If `LINEAR_ISSUE` is present:
+- Read it as a Linear issue, including its labels and project.
+- If it cannot be read and `LINEAR_ISSUE_SOURCE` is `.linear-issue`, stop: the required issue checks cannot be completed.
+- If it cannot be read and `LINEAR_ISSUE_SOURCE` is `tmux-session-ticket` or `tmux-session`, state that no linked Linear issue was found and continue.
+
+For a readable issue:
 - List the workspace issue labels to identify children whose `parent` is `Product Domain`. Do not apply the `Product Domain` label group itself; apply a child domain label.
 - If the issue has none of those labels:
   - Determine the appropriate domain from the issue title, description, linked branch/worktree, and current changes.
@@ -156,11 +189,9 @@ If an issue ID is present:
   - After the user explicitly approves creation, create the project, attach the issue, and report both results.
 - Re-read the issue after any label or project update. Do not proceed until it has at least one `Product Domain` child label and an attached project.
 - If its state is `Done` or `Cancelled`, state that the linked Linear issue is already closed and continue.
-- Otherwise ask: `Linear issue [ID] - [Title] is still open. Mark it Done now?`
+- Otherwise ask: `Linear issue [LINEAR_ISSUE] - [Title] is still open. Mark it Done now?`
 - If the user says `Done` or otherwise approves closure, update the issue state to `Done` and continue. Do not ask for a second confirmation after the issue has been closed.
 - If the user refuses to close the issue, stop. Do not continue with teardown while the linked issue remains open.
-
-If there is no `.linear-issue` file, state that no linked Linear issue was found and continue.
 
 ### 7. Move out of the worktree
 
@@ -199,7 +230,17 @@ tmux run-shell -b "sleep 2; tmux kill-session -t '$SESSION'"
 
 If `SESSION` is empty but `$TMUX` is set, stop instead of skipping tmux shutdown. This means session detection failed.
 
-If `SESSION` is empty and `$TMUX` is unset, skip tmux shutdown and report only that the worktree was removed.
+If `SESSION` is empty and `$TMUX` is unset, do **not** silently skip tmux shutdown. Make one final best-effort attempt to close the current tmux session:
+
+```bash
+TMUX_KILL_ERROR_FILE=$(mktemp)
+tmux kill-session 2>"$TMUX_KILL_ERROR_FILE"
+TMUX_KILL_STATUS=$?
+TMUX_KILL_ERROR=$(sed -n '1,20p' "$TMUX_KILL_ERROR_FILE")
+rm -f "$TMUX_KILL_ERROR_FILE"
+```
+
+If this succeeds, report that tmux was closed by the unscoped fallback. If it fails because there is no server or no current client/session, report that result explicitly and finish teardown. For any other failure, stop and show the error; do not claim tmux cleanup succeeded. Never replace the targeted `kill-session -t "$SESSION"` command when an identified session is available.
 
 ## Response Style
 

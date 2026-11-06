@@ -25,7 +25,7 @@ windows:
     start_directory: "${TMUXP_WORKTREE}"
     panes:
       - shell_command:
-          - codex-subscription.sh -m gpt-5.6-sol -c 'model_reasoning_effort="high"' '$prepare-to-tels-in-tmux'
+          - codex-subscription.sh -m gpt-6.1-sol -c 'model_reasoning_effort="high"' '$prepare-to-tels-in-tmux'
 
   - window_name: "terra-aws"
     start_directory: "${TMUXP_WORKTREE}"

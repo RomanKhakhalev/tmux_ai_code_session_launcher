@@ -69,6 +69,30 @@ After fetching, synthesise per issue:
 
 ---
 
+## Step 1b — Record the issue identifier(s) locally
+
+Write every issue's identifier and title to `.linear_issue` at the worktree root (one line per
+issue, `IDENTIFIER: Title`; overwrite the file, don't append), so this session and later skills
+(e.g. `/start_auto_with_codex`) can recover which Linear issue(s) this session is for without
+re-deriving them from the tmux session name:
+
+```bash
+cat > .linear_issue <<'EOF'
+TEL-NNN: <title>
+EOF
+```
+
+Then confirm it's git-ignored — it is a local working artifact, never meant to be committed:
+
+```bash
+git check-ignore -q .linear_issue && echo IGNORED || echo NOT_IGNORED
+```
+
+If `NOT_IGNORED`, add a `.linear_issue` line to the repo's `.gitignore`. Do not stage or commit
+that change — per this repo's hard rule, commits only happen when the user explicitly asks.
+
+---
+
 ## Step 2 — Investigate the codebase thoroughly (no implementation)
 
 **MANDATORY DEPTH REQUIREMENT:** You must read the actual code — not just file names or grep output. For every issue, read the full bodies of the functions, routes, services, and components that are touched. A plan written from grep output alone will be wrong. Plans grounded in shallow investigation WILL be rejected.

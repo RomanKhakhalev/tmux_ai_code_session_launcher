@@ -110,7 +110,8 @@ Before composing the footer, resolve Linear issue context in this order:
 Rules:
 
 - Treat `.linear-issue` as the canonical file name. Do not create or read `.linear_issue`.
-- Resolve the worktree root with `git rev-parse --show-toplevel` and read or write `<repo-root>/.linear-issue`.
+- Resolve the worktree root with `git rev-parse --show-toplevel` and read `<repo-root>/.linear-issue` only as an optional fallback.
+- Never create, rewrite, or otherwise modify `.linear-issue`. Linear context discovered from the user, tmux, the current thread, or Linear is used only for the generated commit message.
 - If the user explicitly provides one or more Linear issue IDs, use those IDs as authoritative and skip tmux discovery.
 - Otherwise, always attempt tmux discovery before any fallback by running `tmux display-message -p '#S' 2>/dev/null`; if the command fails, returns empty output, or the session name does not clearly encode TEL issue IDs, treat tmux discovery as unavailable.
 - If tmux discovery is unavailable, use TEL issue IDs already known from current thread context before falling back to `.linear-issue`. Current thread context can include prior tool results, summaries after compaction, or explicit assistant/user statements that identified the active tmux session, branch, worktree, or TEL issue list. Only use IDs that were clearly established in the thread; do not infer from a branch name, directory name, plan filename, or vague mention.
@@ -137,19 +138,8 @@ When TEL issue IDs are available from the explicit user request, tmux parsing, o
   - `TEL-123: Short issue title`
 - If Linear lookup fails but the ID is known, keep the bare ID rather than inventing a title.
 
-When at least one issue was resolved from explicit IDs, tmux parsing, or current thread context fallback:
-
-- Rewrite `<repo-root>/.linear-issue` with one line per resolved issue.
-- Use the resolved issue order.
-- Separate lines with `\n`.
-- Do not add extra prose, prefixes, or project-name-only lines.
-- Example:
-  - `TEL-261: First issue title`
-  - `TEL-262: Second issue title`
-
 If no explicit, tmux-derived, or thread-context-derived issue IDs are available:
 
-- Do not modify `.linear-issue`.
 - Use the existing `.linear-issue` content as-is if it exists.
 
 ------------------------------------------------------------
@@ -160,14 +150,14 @@ Before composing the commit message footer:
 
 - If the user explicitly provides a single Linear issue ID and no title was resolved for it, append this footer line exactly:
   - `Refs: TEL-XX`
-- Otherwise, after the Linear-context workflow above completes, run `cat <repo-root>/.linear-issue 2>/dev/null`.
-- If `.linear-issue` returns non-empty content, append the full `cat` output verbatim instead of extracting only the issue ID.
-- If the file is missing or empty, omit the footer entirely.
-- If the `.linear-issue` content is a single line, append this footer line exactly:
-  - `Refs: <full line from .linear-issue>`
-- If the `.linear-issue` content spans multiple lines, append this footer block exactly:
+- Otherwise, if one or more issues were resolved from explicit IDs, tmux parsing, or current thread context, use the resolved issue lines for the footer without persisting them to disk.
+- If no issue was resolved through those sources, read the existing `<repo-root>/.linear-issue` as a fallback without modifying it.
+- If the fallback file is missing or empty, omit the footer entirely.
+- If the resolved or fallback content is a single line, append this footer line exactly:
+  - `Refs: <full resolved or fallback line>`
+- If the resolved or fallback content spans multiple lines, append this footer block exactly:
   - `Refs:`
-  - `<verbatim .linear-issue content>`
+  - `<resolved issue lines or verbatim .linear-issue content>`
 - After the Linear footer logic completes, run `git describe --tags`.
 - If `git describe --tags` returns non-empty output, append this final line exactly:
   - `Product version: <verbatim output of git describe --tags>`
